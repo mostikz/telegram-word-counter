@@ -1,23 +1,14 @@
 import os
 import re
 import sqlite3
-import random
-
 from datetime import datetime, time, timezone, timedelta, date
 
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
-from telegram.constants import ParseMode
-
+from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
     ContextTypes,
     MessageHandler,
-    CallbackQueryHandler,
     filters,
 )
 
@@ -27,22 +18,16 @@ from telegram.ext import (
 # ============================================================
 
 # НЕ вставляй токен прямо в код.
-#
 # Linux/macOS:
 # export BOT_TOKEN="твой_новый_токен"
 #
 # Windows PowerShell:
 # $env:BOT_TOKEN="твой_новый_токен"
 
-TOKEN = os.getenv(
-    "BOT_TOKEN",
-    "PASTE_NEW_TOKEN_HERE"
-)
+TOKEN = os.getenv("BOT_TOKEN", "PASTE_NEW_TOKEN_HERE")
 
 # Москва = UTC+3
-MOSCOW = timezone(
-    timedelta(hours=3)
-)
+MOSCOW = timezone(timedelta(hours=3))
 
 DATABASE = "stats.db"
 
@@ -52,21 +37,18 @@ DATABASE = "stats.db"
 # ============================================================
 
 def get_db():
-
     db = sqlite3.connect(
         DATABASE,
         timeout=30
     )
 
-    db.execute(
-        "PRAGMA journal_mode=WAL"
-    )
+    # Позволяет базе лучше работать при одновременном чтении/записи
+    db.execute("PRAGMA journal_mode=WAL")
 
     return db
 
 
 def init_database():
-
     db = get_db()
     cursor = db.cursor()
 
@@ -121,6 +103,9 @@ def init_database():
 
     # --------------------------------------------------------
     # МИГРАЦИЯ СТАРОЙ БАЗЫ
+    #
+    # Если у тебя уже была старая stats.db,
+    # эти поля будут добавлены автоматически.
     # --------------------------------------------------------
 
     cursor.execute("""
@@ -133,29 +118,24 @@ def init_database():
     }
 
     if "characters" not in columns:
-
         cursor.execute("""
             ALTER TABLE daily_stats
             ADD COLUMN characters INTEGER DEFAULT 0
         """)
 
     if "longest_message_words" not in columns:
-
         cursor.execute("""
             ALTER TABLE daily_stats
             ADD COLUMN longest_message_words INTEGER DEFAULT 0
         """)
 
     if "longest_message_chars" not in columns:
-
         cursor.execute("""
             ALTER TABLE daily_stats
             ADD COLUMN longest_message_chars INTEGER DEFAULT 0
         """)
 
-    # --------------------------------------------------------
-    # ИНДЕКСЫ
-    # --------------------------------------------------------
+    # Индексы ускоряют статистику за периоды
 
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS
@@ -178,34 +158,26 @@ def init_database():
 # ============================================================
 
 def moscow_now():
-
-    return datetime.now(
-        MOSCOW
-    )
+    return datetime.now(MOSCOW)
 
 
 def today_str():
-
-    return moscow_now().strftime(
-        "%Y-%m-%d"
-    )
+    return moscow_now().strftime("%Y-%m-%d")
 
 
 def date_str(value):
-
-    return value.strftime(
-        "%Y-%m-%d"
-    )
+    return value.strftime("%Y-%m-%d")
 
 
 def pretty_date(value):
-
-    return value.strftime(
-        "%d.%m.%Y"
-    )
+    return value.strftime("%d.%m.%Y")
 
 
 def last_n_days(n):
+    """
+    Возвращает период последних n дней,
+    включая сегодняшний.
+    """
 
     today = moscow_now().date()
 
@@ -217,12 +189,14 @@ def last_n_days(n):
 
 
 def current_month_range():
+    """
+    Первый день текущего месяца
+    и сегодняшний день.
+    """
 
     today = moscow_now().date()
 
-    start = today.replace(
-        day=1
-    )
+    start = today.replace(day=1)
 
     return start, today
 
@@ -264,7 +238,7 @@ def save_message(
     cursor = db.cursor()
 
     # --------------------------------------------------------
-    # ДНЕВНАЯ СТАТИСТИКА
+    # Дневная статистика
     # --------------------------------------------------------
 
     cursor.execute("""
@@ -330,7 +304,7 @@ def save_message(
     ))
 
     # --------------------------------------------------------
-    # СТАТИСТИКА ПО ЧАСАМ
+    # Статистика по часам
     # --------------------------------------------------------
 
     cursor.execute("""
@@ -830,7 +804,7 @@ def get_streaks(
     today = moscow_now().date()
 
     # --------------------------------------------------------
-    # ТЕКУЩАЯ СЕРИЯ
+    # Текущая серия
     # --------------------------------------------------------
 
     current = 0
@@ -846,7 +820,7 @@ def get_streaks(
         )
 
     # --------------------------------------------------------
-    # ЛУЧШАЯ СЕРИЯ
+    # Лучшая серия
     # --------------------------------------------------------
 
     best = 0
@@ -953,6 +927,7 @@ def stats_lines(
         start=1
     ):
 
+        user_id = row[0]
         user_name = row[1]
         messages = row[2]
         words = row[3]
@@ -981,626 +956,7 @@ def group_only(update):
         update.effective_chat
         and
         update.effective_chat.type
-        in (
-            "group",
-            "supergroup"
-        )
-    )
-
-
-# ============================================================
-# INLINE UI / STATS
-# ============================================================
-
-def stats_keyboard(active="today"):
-
-    labels = {
-        "today": "👤 Я",
-        "week": "🏆 Неделя",
-        "month": "🗓 Месяц",
-        "group": "📊 Группа",
-        "achievements": "🔥 Достижения",
-    }
-
-    def label(key):
-
-        if key == active:
-            return f"● {labels[key]}"
-
-        return labels[key]
-
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                label("today"),
-                callback_data="stats:today"
-            ),
-            InlineKeyboardButton(
-                label("week"),
-                callback_data="stats:week"
-            ),
-            InlineKeyboardButton(
-                label("month"),
-                callback_data="stats:month"
-            ),
-        ],
-        [
-            InlineKeyboardButton(
-                label("group"),
-                callback_data="stats:group"
-            ),
-            InlineKeyboardButton(
-                label("achievements"),
-                callback_data="stats:achievements"
-            ),
-        ],
-    ])
-
-
-def stats_header(chat_title=None):
-
-    title = (
-        chat_title
-        if chat_title
-        else "Статистика"
-    )
-
-    return (
-        f"📊 <b>{title}</b>\n"
-        f"<i>Статистика активности</i>"
-    )
-
-
-# ============================================================
-# КАРТОЧКА «Я»
-# ============================================================
-
-def make_today_card(
-    chat_id,
-    user_id,
-    user_name,
-    chat_title=None
-):
-
-    today = moscow_now().date()
-
-    (
-        messages,
-        words,
-        characters,
-        longest_words,
-        longest_chars
-    ) = get_user_stats(
-        chat_id,
-        user_id,
-        today,
-        today
-    )
-
-    rank = get_rank(
-        chat_id,
-        user_id,
-        today,
-        today
-    )
-
-    current_streak, best_streak = get_streaks(
-        chat_id,
-        user_id
-    )
-
-    avg = (
-        words / messages
-        if messages
-        else 0
-    )
-
-    total_messages, total_words, total_users = (
-        get_group_totals(
-            chat_id,
-            today,
-            today
-        )
-    )
-
-    rank_text = (
-        f"#{rank}"
-        if rank
-        else "—"
-    )
-
-    return (
-        f"{stats_header(chat_title)}\n\n"
-
-        f"👤 <b>{user_name}</b>\n"
-        f"📅 Сегодня · {pretty_date(today)}\n\n"
-
-        f"📝 <b>{format_number(words)}</b> слов\n"
-        f"💬 <b>{format_number(messages)}</b> сообщений\n"
-        f"📊 <b>{avg:.1f}</b> слов / сообщение\n\n"
-
-        f"🏆 Место: <b>{rank_text}</b>\n"
-        f"🔥 Серия: <b>{current_streak} дн.</b>\n"
-        f"🏅 Рекорд серии: <b>{best_streak} дн.</b>\n\n"
-
-        f"📜 Самое длинное: "
-        f"<b>{format_number(longest_words)}</b> слов\n\n"
-
-        f"👥 Сегодня активны: "
-        f"<b>{format_number(total_users)}</b>\n"
-        f"💬 В группе: "
-        f"<b>{format_number(total_messages)}</b> сообщений"
-    )
-
-
-# ============================================================
-# КАРТОЧКА «НЕДЕЛЯ»
-# ============================================================
-
-def make_week_card(
-    chat_id,
-    chat_title=None
-):
-
-    start_date, end_date = last_n_days(7)
-
-    rows = get_stats(
-        chat_id,
-        start_date,
-        end_date
-    )
-
-    messages, words, users = get_group_totals(
-        chat_id,
-        start_date,
-        end_date
-    )
-
-    result = (
-        f"{stats_header(chat_title)}\n\n"
-        f"🏆 <b>Топ за 7 дней</b>\n"
-        f"📅 {format_period(start_date, end_date)}\n\n"
-    )
-
-    if not rows:
-
-        return (
-            result +
-            "📭 Пока нет статистики."
-        )
-
-    medals = [
-        "🥇",
-        "🥈",
-        "🥉"
-    ]
-
-    for position, row in enumerate(
-        rows[:10],
-        start=1
-    ):
-
-        user_name = row[1]
-        user_messages = row[2]
-        user_words = row[3]
-
-        icon = (
-            medals[position - 1]
-            if position <= 3
-            else f"<b>{position}.</b>"
-        )
-
-        result += (
-            f"{icon} <b>{user_name}</b>\n"
-            f"   📝 {format_number(user_words)} слов"
-            f" · 💬 {format_number(user_messages)}\n"
-        )
-
-    result += (
-        f"\n━━━━━━━━━━━━━━\n"
-        f"👥 Участников: <b>{format_number(users)}</b>\n"
-        f"💬 Сообщений: <b>{format_number(messages)}</b>\n"
-        f"📝 Слов: <b>{format_number(words)}</b>"
-    )
-
-    return result
-
-
-# ============================================================
-# КАРТОЧКА «МЕСЯЦ»
-# ============================================================
-
-def make_month_card(
-    chat_id,
-    chat_title=None
-):
-
-    start_date, end_date = current_month_range()
-
-    rows = get_stats(
-        chat_id,
-        start_date,
-        end_date
-    )
-
-    messages, words, users = get_group_totals(
-        chat_id,
-        start_date,
-        end_date
-    )
-
-    result = (
-        f"{stats_header(chat_title)}\n\n"
-        f"🗓 <b>Топ месяца</b>\n"
-        f"📅 {format_period(start_date, end_date)}\n\n"
-    )
-
-    if not rows:
-
-        return (
-            result +
-            "📭 В этом месяце пока нет статистики."
-        )
-
-    medals = [
-        "🥇",
-        "🥈",
-        "🥉"
-    ]
-
-    for position, row in enumerate(
-        rows[:10],
-        start=1
-    ):
-
-        user_name = row[1]
-        user_messages = row[2]
-        user_words = row[3]
-
-        icon = (
-            medals[position - 1]
-            if position <= 3
-            else f"<b>{position}.</b>"
-        )
-
-        result += (
-            f"{icon} <b>{user_name}</b>\n"
-            f"   📝 {format_number(user_words)} слов"
-            f" · 💬 {format_number(user_messages)}\n"
-        )
-
-    result += (
-        f"\n━━━━━━━━━━━━━━\n"
-        f"👥 Участников: <b>{format_number(users)}</b>\n"
-        f"💬 Сообщений: <b>{format_number(messages)}</b>\n"
-        f"📝 Слов: <b>{format_number(words)}</b>"
-    )
-
-    return result
-
-
-# ============================================================
-# КАРТОЧКА «ГРУППА»
-# ============================================================
-
-def make_group_card(
-    chat_id,
-    chat_title=None
-):
-
-    start_date = date(
-        2000,
-        1,
-        1
-    )
-
-    end_date = moscow_now().date()
-
-    messages, words, users = get_group_totals(
-        chat_id,
-        start_date,
-        end_date
-    )
-
-    rows = get_stats(
-        chat_id,
-        start_date,
-        end_date
-    )
-
-    result = (
-        f"{stats_header(chat_title)}\n\n"
-
-        f"📊 <b>Группа за всё время</b>\n\n"
-
-        f"👥 Участников: "
-        f"<b>{format_number(users)}</b>\n"
-
-        f"💬 Сообщений: "
-        f"<b>{format_number(messages)}</b>\n"
-
-        f"📝 Слов: "
-        f"<b>{format_number(words)}</b>\n"
-    )
-
-    if rows:
-
-        result += (
-            "\n━━━━━━━━━━━━━━\n"
-            "👑 <b>Топ-5 участников</b>\n\n"
-        )
-
-        medals = [
-            "🥇",
-            "🥈",
-            "🥉"
-        ]
-
-        for position, row in enumerate(
-            rows[:5],
-            start=1
-        ):
-
-            icon = (
-                medals[position - 1]
-                if position <= 3
-                else f"{position}."
-            )
-
-            result += (
-                f"{icon} <b>{row[1]}</b>\n"
-                f"   📝 {format_number(row[3])} слов\n"
-            )
-
-    return result
-
-
-# ============================================================
-# КАРТОЧКА «ДОСТИЖЕНИЯ»
-# ============================================================
-
-def make_achievements_card(
-    chat_id,
-    user_id,
-    user_name,
-    chat_title=None
-):
-
-    start_date = date(
-        2000,
-        1,
-        1
-    )
-
-    end_date = moscow_now().date()
-
-    (
-        messages,
-        words,
-        characters,
-        longest_words,
-        longest_chars
-    ) = get_user_stats(
-        chat_id,
-        user_id,
-        start_date,
-        end_date
-    )
-
-    current_streak, best_streak = get_streaks(
-        chat_id,
-        user_id
-    )
-
-    night = get_night_messages(
-        chat_id,
-        user_id
-    )
-
-    achievements_list = []
-
-    # --------------------------------------------------------
-    # СЛОВА
-    # --------------------------------------------------------
-
-    if words >= 10_000:
-
-        achievements_list.append(
-            (
-                "🗣️",
-                "Болтун",
-                "10 000 слов"
-            )
-        )
-
-    if words >= 50_000:
-
-        achievements_list.append(
-            (
-                "📚",
-                "Писатель",
-                "50 000 слов"
-            )
-        )
-
-    if words >= 100_000:
-
-        achievements_list.append(
-            (
-                "📖",
-                "Летописец",
-                "100 000 слов"
-            )
-        )
-
-    # --------------------------------------------------------
-    # СООБЩЕНИЯ
-    # --------------------------------------------------------
-
-    if messages >= 500:
-
-        achievements_list.append(
-            (
-                "💬",
-                "Не замолкает",
-                "500 сообщений"
-            )
-        )
-
-    if messages >= 1_000:
-
-        achievements_list.append(
-            (
-                "⚡",
-                "Марафонец",
-                "1 000 сообщений"
-            )
-        )
-
-    # --------------------------------------------------------
-    # ДЛИННЫЕ СООБЩЕНИЯ
-    # --------------------------------------------------------
-
-    if longest_words >= 1_000:
-
-        achievements_list.append(
-            (
-                "📜",
-                "Простыня",
-                "1 000+ слов в сообщении"
-            )
-        )
-
-    # --------------------------------------------------------
-    # НОЧЬ
-    # --------------------------------------------------------
-
-    if night >= 100:
-
-        achievements_list.append(
-            (
-                "🌙",
-                "Ночной житель",
-                "100 ночных сообщений"
-            )
-        )
-
-    # --------------------------------------------------------
-    # СЕРИЯ
-    # --------------------------------------------------------
-
-    if best_streak >= 7:
-
-        achievements_list.append(
-            (
-                "🔥",
-                "Серия",
-                "7 дней подряд"
-            )
-        )
-
-    if best_streak >= 30:
-
-        achievements_list.append(
-            (
-                "🔥🔥",
-                "Месяц без молчания",
-                "30 дней подряд"
-            )
-        )
-
-    result = (
-        f"{stats_header(chat_title)}\n\n"
-
-        f"🔥 <b>Достижения</b>\n"
-        f"👤 {user_name}\n\n"
-    )
-
-    if not achievements_list:
-
-        return (
-            result +
-            "🔒 Пока открытых достижений нет.\n\n"
-            "Продолжай общаться — "
-            "они появятся здесь."
-        )
-
-    for (
-        icon,
-        title,
-        description
-    ) in achievements_list:
-
-        result += (
-            f"{icon} <b>{title}</b>\n"
-            f"   {description}\n\n"
-        )
-
-    result += (
-        f"━━━━━━━━━━━━━━\n"
-        f"🏅 Открыто: "
-        f"<b>{len(achievements_list)}</b>"
-    )
-
-    return result
-
-
-# ============================================================
-# ВЫБОР КАРТОЧКИ
-# ============================================================
-
-def build_stats_view(
-    view,
-    chat_id,
-    user_id,
-    user_name,
-    chat_title=None
-):
-
-    if view == "today":
-
-        return make_today_card(
-            chat_id,
-            user_id,
-            user_name,
-            chat_title
-        )
-
-    if view == "week":
-
-        return make_week_card(
-            chat_id,
-            chat_title
-        )
-
-    if view == "month":
-
-        return make_month_card(
-            chat_id,
-            chat_title
-        )
-
-    if view == "group":
-
-        return make_group_card(
-            chat_id,
-            chat_title
-        )
-
-    if view == "achievements":
-
-        return make_achievements_card(
-            chat_id,
-            user_id,
-            user_name,
-            chat_title
-        )
-
-    return make_today_card(
-        chat_id,
-        user_id,
-        user_name,
-        chat_title
+        in ("group", "supergroup")
     )
 
 
@@ -1619,14 +975,15 @@ def make_today_stats_text(chat_id):
     )
 
     result = (
-        f"📅 <b>Статистика за сегодня</b>\n\n"
+        f"📅 Напиздели за сегодня\n\n"
         f"{pretty_date(today)}\n\n"
     )
 
     if not rows:
 
         return (
-            result +
+            result
+            +
             "Пока никто ничего "
             "не напиздел 😄"
         )
@@ -1646,7 +1003,8 @@ def make_today_stats_text(chat_id):
     result += (
         f"\n\n"
         f"💬 Всего сообщений: "
-        f"{format_number(total_messages)}\n"
+        f"{format_number(total_messages)}"
+        f"\n"
         f"📝 Всего слов: "
         f"{format_number(total_words)}"
     )
@@ -1681,7 +1039,8 @@ def make_period_stats_text(
     if not rows:
 
         return (
-            result +
+            result
+            +
             "Пока статистики нет 😄"
         )
 
@@ -1703,9 +1062,11 @@ def make_period_stats_text(
     result += (
         f"\n\n"
         f"👥 Активных участников: "
-        f"{format_number(users)}\n"
+        f"{format_number(users)}"
+        f"\n"
         f"💬 Сообщений: "
-        f"{format_number(messages)}\n"
+        f"{format_number(messages)}"
+        f"\n"
         f"📝 Слов: "
         f"{format_number(words)}"
     )
@@ -1729,7 +1090,7 @@ async def start(
         "Я считаю, кто сколько "
         "напиздел в чате.\n\n"
 
-        "/stats — интерактивная статистика\n"
+        "/stats — сегодня\n"
         "/me — твоя статистика\n"
         "/week — последние 7 дней\n"
         "/month — текущий месяц\n"
@@ -1776,95 +1137,11 @@ async def stats(
 
         return
 
-    chat = update.effective_chat
-    user = update.effective_user
-
-    text = build_stats_view(
-        "today",
-        chat.id,
-        user.id,
-        user.full_name,
-        chat.title
-    )
-
     await update.message.reply_text(
-        text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=stats_keyboard("today")
-    )
-
-
-# ============================================================
-# INLINE CALLBACKS /STATS
-# ============================================================
-
-async def stats_callback(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    query = update.callback_query
-
-    await query.answer()
-
-    if not query.message:
-        return
-
-    data = query.data or ""
-
-    if not data.startswith("stats:"):
-        return
-
-    if query.message.chat.type not in (
-        "group",
-        "supergroup"
-    ):
-        return
-
-    view = data.split(
-        ":",
-        1
-    )[1]
-
-    allowed_views = {
-        "today",
-        "week",
-        "month",
-        "group",
-        "achievements",
-    }
-
-    if view not in allowed_views:
-        return
-
-    chat = query.message.chat
-    user = query.from_user
-
-    text = build_stats_view(
-        view,
-        chat.id,
-        user.id,
-        user.full_name,
-        chat.title
-    )
-
-    try:
-
-        await query.edit_message_text(
-            text=text,
-            parse_mode=ParseMode.HTML,
-            reply_markup=stats_keyboard(view)
+        make_today_stats_text(
+            update.effective_chat.id
         )
-
-    except Exception as error:
-
-        # Например, если пользователь нажал
-        # на уже открытый раздел повторно.
-        if "Message is not modified" not in str(error):
-
-            print(
-                f"Ошибка stats callback: {error}"
-            )
+    )
 
 
 # ============================================================
@@ -1896,9 +1173,7 @@ async def me(
         current_month_range()
     )
 
-    # --------------------------------------------------------
     # Сегодня
-    # --------------------------------------------------------
 
     (
         messages,
@@ -1920,9 +1195,7 @@ async def me(
         today
     )
 
-    # --------------------------------------------------------
     # Неделя
-    # --------------------------------------------------------
 
     (
         week_messages,
@@ -1937,9 +1210,7 @@ async def me(
         today
     )
 
-    # --------------------------------------------------------
     # Месяц
-    # --------------------------------------------------------
 
     (
         month_messages,
@@ -1954,9 +1225,7 @@ async def me(
         end_month
     )
 
-    # --------------------------------------------------------
     # Серии
-    # --------------------------------------------------------
 
     current_streak, best_streak = (
         get_streaks(
@@ -1965,9 +1234,7 @@ async def me(
         )
     )
 
-    # --------------------------------------------------------
     # Ночь
-    # --------------------------------------------------------
 
     night = get_night_messages(
         chat_id,
@@ -2035,7 +1302,9 @@ async def week(
 
         return
 
-    start_date, end_date = last_n_days(7)
+    start_date, end_date = (
+        last_n_days(7)
+    )
 
     await update.message.reply_text(
 
@@ -2171,7 +1440,9 @@ async def activity(
 
     chat_id = update.effective_chat.id
 
-    start_date, end_date = last_n_days(7)
+    start_date, end_date = (
+        last_n_days(7)
+    )
 
     rows = get_daily_group_activity(
         chat_id,
@@ -2247,7 +1518,9 @@ async def hours(
 
     chat_id = update.effective_chat.id
 
-    start_date, end_date = last_n_days(7)
+    start_date, end_date = (
+        last_n_days(7)
+    )
 
     rows = get_hourly_activity(
         chat_id,
@@ -2353,6 +1626,10 @@ async def achievements(
 
     achievements_list = []
 
+    # --------------------------------------------------------
+    # Слова
+    # --------------------------------------------------------
+
     if words >= 10_000:
 
         achievements_list.append(
@@ -2371,6 +1648,10 @@ async def achievements(
             "📖 Летописец — 100 000 слов"
         )
 
+    # --------------------------------------------------------
+    # Сообщения
+    # --------------------------------------------------------
+
     if messages >= 500:
 
         achievements_list.append(
@@ -2385,6 +1666,10 @@ async def achievements(
             "1 000 сообщений"
         )
 
+    # --------------------------------------------------------
+    # Длинные сообщения
+    # --------------------------------------------------------
+
     if longest_words >= 1_000:
 
         achievements_list.append(
@@ -2392,12 +1677,20 @@ async def achievements(
             "сообщение на 1 000+ слов"
         )
 
+    # --------------------------------------------------------
+    # Ночь
+    # --------------------------------------------------------
+
     if night >= 100:
 
         achievements_list.append(
             "🌙 Ночной житель — "
             "100 ночных сообщений"
         )
+
+    # --------------------------------------------------------
+    # Серия
+    # --------------------------------------------------------
 
     if best_streak >= 7:
 
@@ -2468,7 +1761,7 @@ async def records(
     ]
 
     # --------------------------------------------------------
-    # РЕКОРД СЛОВ
+    # Рекорд слов
     # --------------------------------------------------------
 
     if best_words:
@@ -2482,7 +1775,7 @@ async def records(
         )
 
     # --------------------------------------------------------
-    # РЕКОРД СООБЩЕНИЙ
+    # Рекорд сообщений
     # --------------------------------------------------------
 
     if best_messages:
@@ -2496,7 +1789,7 @@ async def records(
         )
 
     # --------------------------------------------------------
-    # САМОЕ ДЛИННОЕ
+    # Самое длинное сообщение
     # --------------------------------------------------------
 
     if longest_message:
@@ -2539,6 +1832,8 @@ async def fact(
 
         return
 
+    import random
+
     chat_id = update.effective_chat.id
 
     start_date = date(
@@ -2567,7 +1862,7 @@ async def fact(
     facts = []
 
     # --------------------------------------------------------
-    # ГЛАВНЫЙ БОЛТУН
+    # Главный болтун
     # --------------------------------------------------------
 
     top = rows[0]
@@ -2581,7 +1876,7 @@ async def fact(
     )
 
     # --------------------------------------------------------
-    # САМЫЙ ДЛИННЫЙ ТЕКСТ
+    # Самый длинный текст
     # --------------------------------------------------------
 
     longest = max(
@@ -2600,7 +1895,7 @@ async def fact(
         )
 
     # --------------------------------------------------------
-    # УЧАСТНИКИ
+    # Участники
     # --------------------------------------------------------
 
     messages, words, users = (
@@ -2622,7 +1917,7 @@ async def fact(
         )
 
     # --------------------------------------------------------
-    # СООБЩЕНИЯ
+    # Сообщения
     # --------------------------------------------------------
 
     if messages:
@@ -2635,7 +1930,7 @@ async def fact(
         )
 
     # --------------------------------------------------------
-    # СЛОВА
+    # Слова
     # --------------------------------------------------------
 
     if words:
@@ -2694,19 +1989,15 @@ async def count_message(
     )
 
     # --------------------------------------------------------
-    # Команды не считаем
+    # Команды не считаем как обычные сообщения.
     # --------------------------------------------------------
 
     if text.lstrip().startswith("/"):
         return
 
-    words = count_words(
-        text
-    )
+    words = count_words(text)
 
-    characters = len(
-        text
-    )
+    characters = len(text)
 
     # Час по Москве
 
@@ -2760,14 +2051,17 @@ async def daily_report(
 
         try:
 
+            # ВАЖНО:
+            # здесь остаётся именно статистика
+            # ТЕКУЩЕГО дня на момент 20:00.
+
             text = make_today_stats_text(
                 chat_id
             )
 
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=text,
-                parse_mode=ParseMode.HTML
+                text=text
             )
 
             print(
@@ -2805,9 +2099,9 @@ def main():
         .build()
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # КОМАНДЫ
-    # ========================================================
+    # --------------------------------------------------------
 
     app.add_handler(
         CommandHandler(
@@ -2827,17 +2121,6 @@ def main():
         CommandHandler(
             "stats",
             stats
-        )
-    )
-
-    # --------------------------------------------------------
-    # INLINE-КНОПКИ /STATS
-    # --------------------------------------------------------
-
-    app.add_handler(
-        CallbackQueryHandler(
-            stats_callback,
-            pattern=r"^stats:"
         )
     )
 
@@ -2904,9 +2187,9 @@ def main():
         )
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # СООБЩЕНИЯ
-    # ========================================================
+    # --------------------------------------------------------
 
     app.add_handler(
 
@@ -2924,9 +2207,9 @@ def main():
         )
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # ОТЧЁТ В 20:00 ПО МОСКВЕ
-    # ========================================================
+    # --------------------------------------------------------
 
     app.job_queue.run_daily(
 
@@ -2938,10 +2221,6 @@ def main():
             tzinfo=MOSCOW
         )
     )
-
-    # ========================================================
-    # ЗАПУСК
-    # ========================================================
 
     print(
         "================================"
@@ -2960,11 +2239,19 @@ def main():
     )
 
     print(
-        "Интерактивный /stats: ВКЛ"
+        "Команды:"
     )
 
     print(
-        "Inline-кнопки: ВКЛ"
+        "/stats /me /week /month"
+    )
+
+    print(
+        "/group /activity /hours"
+    )
+
+    print(
+        "/achievements /records /fact"
     )
 
     print(
@@ -2979,5 +2266,4 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
-
     main()
