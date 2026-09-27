@@ -18,7 +18,7 @@ from telegram.ext import (
 
 # ВСТАВЬ СЮДА НОВЫЙ ТОКЕН, КОТОРЫЙ ТЫ ПОЛУЧИЛ
 # ПОСЛЕ ОТЗЫВА СТАРОГО ТОКЕНА В BOTFATHER.
-TOKEN = "8650768988:AAHoVmy-6bjKWYdcjOdPgn2hcGuv39Vh4UI"
+TOKEN = "8650768988:AAHvpErqCoyiwudLKouesuIWKcbomEn5J0w"
 
 # Москва = UTC+3
 MOSCOW = timezone(timedelta(hours=3))
