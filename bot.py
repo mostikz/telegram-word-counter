@@ -6,8 +6,8 @@ from datetime import datetime, time, timezone, timedelta, date
 from telegram import (
     Update,
     BotCommand,
-    MenuButtonCommands,
-    BotCommandScopeDefault,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
 )
 from telegram.ext import (
     Application,
@@ -1083,22 +1083,70 @@ def make_period_stats_text(
 # /START
 # ============================================================
 
+# ============================================================
+# ПОСТОЯННАЯ КЛАВИАТУРА ВНИЗУ ЧАТА
+# ============================================================
+
+MENU_TODAY = "📅 Сегодня"
+MENU_ME = "👤 Моя статистика"
+MENU_WEEK = "🏆 7 дней"
+MENU_MONTH = "🗓 Месяц"
+MENU_GROUP = "📊 Группа"
+MENU_ACTIVITY = "📈 Активность"
+MENU_HOURS = "🕐 По часам"
+MENU_ACHIEVEMENTS = "🏅 Достижения"
+MENU_RECORDS = "🏆 Рекорды"
+MENU_FACT = "🎲 Факт"
+MENU_HELP = "ℹ️ Помощь"
+
+
+def reply_keyboard():
+    """Постоянное меню прямо над полем ввода Telegram."""
+    return ReplyKeyboardMarkup(
+        [
+            [
+                KeyboardButton(MENU_TODAY),
+                KeyboardButton(MENU_ME),
+            ],
+            [
+                KeyboardButton(MENU_WEEK),
+                KeyboardButton(MENU_MONTH),
+            ],
+            [
+                KeyboardButton(MENU_GROUP),
+                KeyboardButton(MENU_ACTIVITY),
+            ],
+            [
+                KeyboardButton(MENU_HOURS),
+                KeyboardButton(MENU_ACHIEVEMENTS),
+            ],
+            [
+                KeyboardButton(MENU_RECORDS),
+                KeyboardButton(MENU_FACT),
+            ],
+            [
+                KeyboardButton(MENU_HELP),
+            ],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        is_persistent=True,
+        input_field_placeholder="Выбери раздел 👇",
+    )
+
+
 async def start(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
 
     await update.message.reply_text(
-
-        "Привет! 🤖\\n\\n"
-
-        "Я считаю, кто сколько "
-        "напиздел в чате.\\n\\n"
-
-        "Все разделы доступны через кнопку "
-        "«Menu» / «Меню» внизу чата. 👇\\n\\n"
-
-        "Нажми её и выбери нужный раздел."
+        "Привет! 🤖\n\n"
+        "Я считаю статистику сообщений в чате.\n\n"
+        "Ниже появилось постоянное меню 👇\n"
+        "Выбирай нужный раздел кнопкой — меню останется "
+        "на месте и будет доступно в любой момент.",
+        reply_markup=reply_keyboard(),
     )
 
 
@@ -1948,6 +1996,54 @@ async def fact(
     )
 
 
+# Кнопка -> существующий обработчик.
+MENU_HANDLERS = {
+    MENU_TODAY: stats,
+    MENU_ME: me,
+    MENU_WEEK: week,
+    MENU_MONTH: month,
+    MENU_GROUP: group,
+    MENU_ACTIVITY: activity,
+    MENU_HOURS: hours,
+    MENU_ACHIEVEMENTS: achievements,
+    MENU_RECORDS: records,
+    MENU_FACT: fact,
+    MENU_HELP: help_command,
+}
+
+
+# ============================================================
+# ОБРАБОТКА НАЖАТИЙ ПОСТОЯННОГО МЕНЮ
+# ============================================================
+
+async def reply_keyboard_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    """Обрабатывает кнопки постоянной Reply Keyboard.
+
+    Если пользователь написал обычный текст, передаём его
+    в старый обработчик статистики, чтобы логика подсчёта
+    сообщений полностью сохранилась.
+    """
+
+    message = update.message
+    if not message:
+        return
+
+    # Кнопки Reply Keyboard приходят как обычный текст.
+    # Подписи к фото/видео и обычные сообщения по-прежнему
+    # передаём в старую статистическую логику.
+    text = (message.text or "").strip()
+
+    if text not in MENU_HANDLERS:
+        await count_message(update, context)
+        return
+
+    handler = MENU_HANDLERS[text]
+    await handler(update, context)
+
+
 # ============================================================
 # ОБРАБОТКА СООБЩЕНИЙ
 # ============================================================
@@ -2076,11 +2172,11 @@ async def daily_report(
 
 
 # ============================================================
-# TELEGRAM MENU
+# КОМАНДЫ TELEGRAM
 # ============================================================
 
 BOT_COMMANDS = [
-    BotCommand("start", "Открыть меню бота"),
+    BotCommand("start", "Открыть постоянное меню"),
     BotCommand("stats", "Статистика за сегодня"),
     BotCommand("me", "Моя статистика"),
     BotCommand("week", "Статистика за 7 дней"),
@@ -2096,31 +2192,10 @@ BOT_COMMANDS = [
 
 
 async def post_init(application: Application):
-    """
-    Настраивает нативное меню Telegram.
-
-    В результате внизу чата рядом с полем ввода
-    появляется кнопка Menu / Меню. При нажатии Telegram
-    показывает список команд бота.
-    """
-
-    # Явно задаём команды для DEFAULT scope.
-    # Без scope Telegram-клиент в некоторых случаях может
-    # не обновить список команд для уже открытого чата.
-    await application.bot.set_my_commands(
-        commands=BOT_COMMANDS,
-        scope=BotCommandScopeDefault(),
-    )
-
-    # Включаем именно стандартную кнопку Menu внизу чата.
-    # Telegram открывает из неё список команд BOT_COMMANDS.
-    await application.bot.set_chat_menu_button(
-        menu_button=MenuButtonCommands()
-    )
-
-    print(
-        "Нативное меню Telegram настроено."
-    )
+    # Оставляем список команд Telegram для совместимости, но основное
+    # пользовательское меню — ReplyKeyboardMarkup прямо над полем ввода.
+    await application.bot.set_my_commands(BOT_COMMANDS)
+    print("Постоянная Reply Keyboard будет показана после /start.")
 
 
 # ============================================================
@@ -2250,7 +2325,7 @@ def main():
             &
             ~filters.COMMAND,
 
-            count_message
+            reply_keyboard_handler
         )
     )
 
@@ -2286,11 +2361,11 @@ def main():
     )
 
     print(
-        "Нативное меню Telegram: включено"
+        "Постоянное меню Reply Keyboard: включено"
     )
 
     print(
-        "Кнопка Menu находится внизу чата"
+        "Меню появляется над полем ввода после /start"
     )
 
     print(
