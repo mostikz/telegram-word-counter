@@ -1074,106 +1074,102 @@ def make_period_stats_text(
     return result
 
 
+
 # ============================================================
-# /START
+# ИНТЕРФЕЙС БОТА — INLINE-КНОПКИ
 # ============================================================
 
-async def start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
+from telegram.ext import CallbackQueryHandler
 
-    await update.message.reply_text(
 
-        "Привет! 🤖\n\n"
+def main_menu_keyboard():
+    """Главное меню бота."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📅 Сегодня", callback_data="today"),
+            InlineKeyboardButton("👤 Моя статистика", callback_data="me"),
+        ],
+        [
+            InlineKeyboardButton("🏆 7 дней", callback_data="week"),
+            InlineKeyboardButton("🗓 Месяц", callback_data="month"),
+        ],
+        [
+            InlineKeyboardButton("📊 Группа", callback_data="group"),
+            InlineKeyboardButton("📈 Активность", callback_data="activity"),
+        ],
+        [
+            InlineKeyboardButton("🕐 По часам", callback_data="hours"),
+            InlineKeyboardButton("🏅 Достижения", callback_data="achievements"),
+        ],
+        [
+            InlineKeyboardButton("🏆 Рекорды", callback_data="records"),
+            InlineKeyboardButton("🎲 Факт", callback_data="fact"),
+        ],
+        [
+            InlineKeyboardButton("ℹ️ Помощь", callback_data="help"),
+        ],
+    ])
 
-        "Я считаю, кто сколько "
-        "напиздел в чате.\n\n"
 
-        "/stats — сегодня\n"
-        "/me — твоя статистика\n"
-        "/week — последние 7 дней\n"
-        "/month — текущий месяц\n"
-        "/group — статистика группы\n"
-        "/activity — активность по дням\n"
-        "/hours — активность по часам\n"
-        "/achievements — достижения\n"
-        "/records — рекорды\n"
-        "/fact — случайный факт\n"
-        "/help — список команд"
+def back_keyboard():
+    """Кнопка возврата в главное меню."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu")]
+    ])
+
+
+def screen_text():
+    return (
+        "🤖 Статистика чата\n\n"
+        "Я считаю, кто сколько написал в группе.\n\n"
+        "Выбери нужный раздел кнопкой ниже:"
     )
 
 
-# ============================================================
-# /HELP
-# ============================================================
-
-async def help_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    await start(
-        update,
-        context
+def group_required_text():
+    return (
+        "⚠️ Этот раздел работает только в группе.\n\n"
+        "Добавь бота в группу и открой меню там."
     )
 
 
-# ============================================================
-# /STATS
-# ============================================================
-
-async def stats(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not group_only(update):
-
+async def send_menu(update: Update):
+    """Показывает главное меню обычным сообщением."""
+    if update.message:
         await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
+            screen_text(),
+            reply_markup=main_menu_keyboard(),
         )
 
-        return
 
-    await update.message.reply_text(
-        make_today_stats_text(
-            update.effective_chat.id
-        )
+async def edit_screen(query, text, keyboard=None):
+    """Обновляет текущее сообщение, не создавая новое."""
+    await query.edit_message_text(
+        text=text,
+        reply_markup=keyboard or back_keyboard(),
     )
 
 
-# ============================================================
-# /ME
-# ============================================================
+def callback_group_only(query):
+    """Проверка, что кнопка нажата внутри группы."""
+    message = query.message
+    return (
+        message
+        and message.chat
+        and message.chat.type in ("group", "supergroup")
+    )
 
-async def me(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
 
-    if not group_only(update):
-
-        await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
-        )
-
-        return
-
-    chat_id = update.effective_chat.id
-    user = update.effective_user
-
+def make_me_stats_text(chat_id, user):
     today = moscow_now().date()
 
     start_7, _ = last_n_days(7)
 
-    start_month, end_month = (
-        current_month_range()
-    )
-
-    # Сегодня
+    start_month, end_month = current_month_range()
 
     (
         messages,
@@ -1185,17 +1181,15 @@ async def me(
         chat_id,
         user.id,
         today,
-        today
+        today,
     )
 
     rank = get_rank(
         chat_id,
         user.id,
         today,
-        today
+        today,
     )
-
-    # Неделя
 
     (
         week_messages,
@@ -1207,10 +1201,8 @@ async def me(
         chat_id,
         user.id,
         start_7,
-        today
+        today,
     )
-
-    # Месяц
 
     (
         month_messages,
@@ -1222,41 +1214,29 @@ async def me(
         chat_id,
         user.id,
         start_month,
-        end_month
+        end_month,
     )
 
-    # Серии
-
-    current_streak, best_streak = (
-        get_streaks(
-            chat_id,
-            user.id
-        )
+    current_streak, best_streak = get_streaks(
+        chat_id,
+        user.id,
     )
-
-    # Ночь
 
     night = get_night_messages(
         chat_id,
-        user.id
+        user.id,
     )
 
-    avg = (
-        words / messages
-        if messages
-        else 0
-    )
+    avg = words / messages if messages else 0
 
-    text = (
-
+    return (
         f"👤 {user.full_name}\n\n"
 
         f"📅 Сегодня:\n"
         f"📝 {format_number(words)} слов\n"
         f"💬 {format_number(messages)} сообщений\n"
         f"📊 {avg:.1f} слов/сообщение\n"
-        f"🏆 Место: "
-        f"{rank if rank else '—'}\n\n"
+        f"🏆 Место: {rank if rank else '—'}\n\n"
 
         f"📆 За 7 дней: "
         f"{format_number(week_words)} слов / "
@@ -1266,148 +1246,38 @@ async def me(
         f"{format_number(month_words)} слов / "
         f"{format_number(month_messages)} сообщ.\n\n"
 
-        f"🔥 Серия сейчас: "
-        f"{current_streak} дн.\n"
-
-        f"🏅 Лучшая серия: "
-        f"{best_streak} дн.\n"
-
-        f"🌙 Ночных сообщений: "
-        f"{format_number(night)}\n"
-
+        f"🔥 Серия сейчас: {current_streak} дн.\n"
+        f"🏅 Лучшая серия: {best_streak} дн.\n"
+        f"🌙 Ночных сообщений: {format_number(night)}\n"
         f"📜 Самое длинное сегодня: "
         f"{format_number(longest_words)} слов"
     )
 
-    await update.message.reply_text(
-        text
-    )
 
-
-# ============================================================
-# /WEEK
-# ============================================================
-
-async def week(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not group_only(update):
-
-        await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
-        )
-
-        return
-
-    start_date, end_date = (
-        last_n_days(7)
-    )
-
-    await update.message.reply_text(
-
-        make_period_stats_text(
-            update.effective_chat.id,
-            "🏆 Топ за 7 дней",
-            start_date,
-            end_date
-        )
-    )
-
-
-# ============================================================
-# /MONTH
-# ============================================================
-
-async def month(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not group_only(update):
-
-        await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
-        )
-
-        return
-
-    start_date, end_date = (
-        current_month_range()
-    )
-
-    await update.message.reply_text(
-
-        make_period_stats_text(
-            update.effective_chat.id,
-            "🏆 Топ за месяц",
-            start_date,
-            end_date
-        )
-    )
-
-
-# ============================================================
-# /GROUP
-# ============================================================
-
-async def group(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not group_only(update):
-
-        await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
-        )
-
-        return
-
-    chat_id = update.effective_chat.id
-
-    start_date = date(
-        2000,
-        1,
-        1
-    )
-
+def make_group_stats_text(chat_id):
+    start_date = date(2000, 1, 1)
     end_date = moscow_now().date()
 
-    messages, words, users = (
-        get_group_totals(
-            chat_id,
-            start_date,
-            end_date
-        )
+    messages, words, users = get_group_totals(
+        chat_id,
+        start_date,
+        end_date,
     )
 
     top = get_stats(
         chat_id,
         start_date,
-        end_date
+        end_date,
     )[:1]
 
     text = (
-
         "📊 Наша группа\n\n"
-
-        f"👥 Активных участников: "
-        f"{format_number(users)}\n"
-
-        f"💬 Сообщений за всё время: "
-        f"{format_number(messages)}\n"
-
-        f"📝 Слов за всё время: "
-        f"{format_number(words)}\n"
+        f"👥 Активных участников: {format_number(users)}\n"
+        f"💬 Сообщений за всё время: {format_number(messages)}\n"
+        f"📝 Слов за всё время: {format_number(words)}\n"
     )
 
     if top:
-
         text += (
             "\n"
             "👑 Главный болтун:\n"
@@ -1415,188 +1285,91 @@ async def group(
             f"{format_number(top[0][3])} слов"
         )
 
-    await update.message.reply_text(
-        text
-    )
+    return text
 
 
-# ============================================================
-# /ACTIVITY
-# ============================================================
-
-async def activity(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not group_only(update):
-
-        await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
-        )
-
-        return
-
-    chat_id = update.effective_chat.id
-
-    start_date, end_date = (
-        last_n_days(7)
-    )
+def make_activity_text(chat_id):
+    start_date, end_date = last_n_days(7)
 
     rows = get_daily_group_activity(
         chat_id,
         start_date,
-        end_date
+        end_date,
     )
 
     by_date = {
-        row[0]: (
-            row[1],
-            row[2]
-        )
+        row[0]: (row[1], row[2])
         for row in rows
     }
 
     max_words = max(
-        (
-            value[1]
-            for value in by_date.values()
-        ),
-        default=0
+        (value[1] for value in by_date.values()),
+        default=0,
     )
 
     lines = [
         "📈 Активность группы за 7 дней",
-        ""
+        "",
     ]
 
     for i in range(7):
+        d = start_date + timedelta(days=i)
 
-        d = (
-            start_date
-            +
-            timedelta(days=i)
-        )
-
-        messages, words = (
-            by_date.get(
-                date_str(d),
-                (0, 0)
-            )
+        messages, words = by_date.get(
+            date_str(d),
+            (0, 0),
         )
 
         lines.append(
-
             f"{d.strftime('%a %d.%m')}: "
             f"{bar(words, max_words)} "
             f"{format_number(words)} слов"
         )
 
-    await update.message.reply_text(
-        "\n".join(lines)
-    )
+    return "\n".join(lines)
 
 
-# ============================================================
-# /HOURS
-# ============================================================
-
-async def hours(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not group_only(update):
-
-        await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
-        )
-
-        return
-
-    chat_id = update.effective_chat.id
-
-    start_date, end_date = (
-        last_n_days(7)
-    )
+def make_hours_text(chat_id):
+    start_date, end_date = last_n_days(7)
 
     rows = get_hourly_activity(
         chat_id,
         start_date,
-        end_date
+        end_date,
     )
 
     by_hour = {
-        row[0]: (
-            row[1],
-            row[2]
-        )
+        row[0]: (row[1], row[2])
         for row in rows
     }
 
     max_words = max(
-        (
-            value[1]
-            for value in by_hour.values()
-        ),
-        default=0
+        (value[1] for value in by_hour.values()),
+        default=0,
     )
 
     lines = [
         "🕐 Активность по часам за 7 дней",
-        ""
+        "",
     ]
 
     for hour in range(24):
-
-        messages, words = (
-            by_hour.get(
-                hour,
-                (0, 0)
-            )
+        messages, words = by_hour.get(
+            hour,
+            (0, 0),
         )
 
         lines.append(
-
             f"{hour:02d}:00 "
             f"{bar(words, max_words, 12)} "
             f"{format_number(words)}"
         )
 
-    await update.message.reply_text(
-        "\n".join(lines)
-    )
+    return "\n".join(lines)
 
 
-# ============================================================
-# /ACHIEVEMENTS
-# ============================================================
-
-async def achievements(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not group_only(update):
-
-        await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
-        )
-
-        return
-
-    chat_id = update.effective_chat.id
-    user = update.effective_user
-
-    start_date = date(
-        2000,
-        1,
-        1
-    )
-
+def make_achievements_text(chat_id, user):
+    start_date = date(2000, 1, 1)
     end_date = moscow_now().date()
 
     (
@@ -1609,193 +1382,109 @@ async def achievements(
         chat_id,
         user.id,
         start_date,
-        end_date
+        end_date,
     )
 
-    current_streak, best_streak = (
-        get_streaks(
-            chat_id,
-            user.id
-        )
+    current_streak, best_streak = get_streaks(
+        chat_id,
+        user.id,
     )
 
     night = get_night_messages(
         chat_id,
-        user.id
+        user.id,
     )
 
     achievements_list = []
 
-    # --------------------------------------------------------
-    # Слова
-    # --------------------------------------------------------
-
     if words >= 10_000:
-
         achievements_list.append(
             "🗣️ Болтун — 10 000 слов"
         )
 
     if words >= 50_000:
-
         achievements_list.append(
             "📚 Писатель — 50 000 слов"
         )
 
     if words >= 100_000:
-
         achievements_list.append(
             "📖 Летописец — 100 000 слов"
         )
 
-    # --------------------------------------------------------
-    # Сообщения
-    # --------------------------------------------------------
-
     if messages >= 500:
-
         achievements_list.append(
-            "💬 Не замолкает — "
-            "500 сообщений"
+            "💬 Не замолкает — 500 сообщений"
         )
 
     if messages >= 1_000:
-
         achievements_list.append(
-            "⚡ Марафонец — "
-            "1 000 сообщений"
+            "⚡ Марафонец — 1 000 сообщений"
         )
-
-    # --------------------------------------------------------
-    # Длинные сообщения
-    # --------------------------------------------------------
 
     if longest_words >= 1_000:
-
         achievements_list.append(
-            "📜 Простыня — "
-            "сообщение на 1 000+ слов"
+            "📜 Простыня — сообщение на 1 000+ слов"
         )
-
-    # --------------------------------------------------------
-    # Ночь
-    # --------------------------------------------------------
 
     if night >= 100:
-
         achievements_list.append(
-            "🌙 Ночной житель — "
-            "100 ночных сообщений"
+            "🌙 Ночной житель — 100 ночных сообщений"
         )
 
-    # --------------------------------------------------------
-    # Серия
-    # --------------------------------------------------------
-
     if best_streak >= 7:
-
         achievements_list.append(
-            "🔥 Серия — "
-            "7 дней подряд"
+            "🔥 Серия — 7 дней подряд"
         )
 
     if best_streak >= 30:
-
         achievements_list.append(
-            "🔥🔥 Месяц без молчания — "
-            "30 дней подряд"
+            "🔥🔥 Месяц без молчания — 30 дней подряд"
         )
 
     if not achievements_list:
-
-        text = (
+        return (
             "🏅 Достижения\n\n"
             "Пока достижений нет. "
             "Начинай напиздеть 😄"
         )
 
-    else:
-
-        text = (
-            "🏅 Твои достижения\n\n"
-            +
-            "\n".join(
-                achievements_list
-            )
-        )
-
-    await update.message.reply_text(
-        text
+    return (
+        "🏅 Твои достижения\n\n"
+        + "\n".join(achievements_list)
     )
 
 
-# ============================================================
-# /RECORDS
-# ============================================================
-
-async def records(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not group_only(update):
-
-        await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
-        )
-
-        return
-
+def make_records_text(chat_id):
     (
         best_words,
         best_messages,
         longest_message
-    ) = get_best_records(
-        update.effective_chat.id
-    )
+    ) = get_best_records(chat_id)
 
     lines = [
         "🏆 Рекорды группы",
-        ""
+        "",
     ]
 
-    # --------------------------------------------------------
-    # Рекорд слов
-    # --------------------------------------------------------
-
     if best_words:
-
         lines.append(
-
             "📝 Больше всего слов за день:\n"
             f"{best_words[0]} — "
             f"{format_number(best_words[1])} слов "
             f"({best_words[2]})"
         )
 
-    # --------------------------------------------------------
-    # Рекорд сообщений
-    # --------------------------------------------------------
-
     if best_messages:
-
         lines.append(
-
             "\n💬 Больше всего сообщений за день:\n"
             f"{best_messages[0]} — "
             f"{format_number(best_messages[1])} сообщений "
             f"({best_messages[2]})"
         )
 
-    # --------------------------------------------------------
-    # Самое длинное сообщение
-    # --------------------------------------------------------
-
     if longest_message:
-
         lines.append(
-
             "\n📜 Самое длинное сообщение:\n"
             f"{longest_message[0]} — "
             f"{format_number(longest_message[1])} слов / "
@@ -1804,152 +1493,327 @@ async def records(
         )
 
     if len(lines) == 2:
+        lines.append("Рекордов пока нет 😄")
 
-        lines.append(
-            "Рекордов пока нет 😄"
-        )
-
-    await update.message.reply_text(
-        "\n".join(lines)
-    )
+    return "\n".join(lines)
 
 
-# ============================================================
-# /FACT
-# ============================================================
-
-async def fact(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not group_only(update):
-
-        await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
-        )
-
-        return
-
+def make_fact_text(chat_id):
     import random
 
-    chat_id = update.effective_chat.id
-
-    start_date = date(
-        2000,
-        1,
-        1
-    )
-
+    start_date = date(2000, 1, 1)
     end_date = moscow_now().date()
 
     rows = get_stats(
         chat_id,
         start_date,
-        end_date
+        end_date,
     )
 
     if not rows:
-
-        await update.message.reply_text(
-            "🤔 Пока мало данных "
-            "для фактов."
-        )
-
-        return
+        return "🤔 Пока мало данных для фактов."
 
     facts = []
-
-    # --------------------------------------------------------
-    # Главный болтун
-    # --------------------------------------------------------
 
     top = rows[0]
 
     facts.append(
-
-        f"👑 {top[1]} — "
-        f"главный болтун группы: "
-        f"{format_number(top[3])} "
-        f"слов за всё время."
+        f"👑 {top[1]} — главный болтун группы: "
+        f"{format_number(top[3])} слов за всё время."
     )
-
-    # --------------------------------------------------------
-    # Самый длинный текст
-    # --------------------------------------------------------
 
     longest = max(
         rows,
-        key=lambda row: row[5]
+        key=lambda row: row[5],
     )
 
     if longest[5]:
-
         facts.append(
-
-            f"📜 {longest[1]} "
-            f"однажды написал(а) "
-            f"{format_number(longest[5])} "
-            f"слов за день в одном сообщении."
+            f"📜 {longest[1]} однажды написал(а) "
+            f"{format_number(longest[5])} слов за день "
+            f"в одном сообщении."
         )
 
-    # --------------------------------------------------------
-    # Участники
-    # --------------------------------------------------------
-
-    messages, words, users = (
-        get_group_totals(
-            chat_id,
-            start_date,
-            end_date
-        )
+    messages, words, users = get_group_totals(
+        chat_id,
+        start_date,
+        end_date,
     )
 
     if users:
-
         facts.append(
-
-            f"👥 В статистике группы "
-            f"уже есть "
-            f"{format_number(users)} "
-            f"активных участников."
+            f"👥 В статистике группы уже есть "
+            f"{format_number(users)} активных участников."
         )
-
-    # --------------------------------------------------------
-    # Сообщения
-    # --------------------------------------------------------
 
     if messages:
-
         facts.append(
-
             f"💬 Всего группа отправила "
-            f"{format_number(messages)} "
-            f"сообщений."
+            f"{format_number(messages)} сообщений."
         )
-
-    # --------------------------------------------------------
-    # Слова
-    # --------------------------------------------------------
 
     if words:
-
         facts.append(
-
             f"📝 Всего группа написала "
-            f"{format_number(words)} "
-            f"слов."
+            f"{format_number(words)} слов."
         )
 
-    await update.message.reply_text(
+    return "🎲 Факт дня\n\n" + random.choice(facts)
 
-        "🎲 Факт дня\n\n"
-        +
-        random.choice(facts)
+
+# ============================================================
+# /START — единственная команда для запуска меню
+# ============================================================
+
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    await send_menu(update)
+
+
+# ============================================================
+# CALLBACK-КНОПКИ
+# ============================================================
+
+async def button_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    query = update.callback_query
+
+    if not query:
+        return
+
+    await query.answer()
+
+    action = query.data
+
+    # Главное меню
+    if action == "menu":
+        await edit_screen(
+            query,
+            screen_text(),
+            main_menu_keyboard(),
+        )
+        return
+
+    # Помощь
+    if action == "help":
+        text = (
+            "ℹ️ Как пользоваться ботом\n\n"
+            "Просто нажимай кнопки в меню.\n\n"
+            "📅 Сегодня — статистика за текущий день.\n"
+            "👤 Моя статистика — твои личные показатели.\n"
+            "🏆 7 дней — рейтинг за последние 7 дней.\n"
+            "🗓 Месяц — рейтинг за текущий месяц.\n"
+            "📊 Группа — статистика за всё время.\n"
+            "📈 Активность — активность по дням.\n"
+            "🕐 По часам — активность по часам.\n"
+            "🏅 Достижения — твои достижения.\n"
+            "🏆 Рекорды — рекорды группы.\n"
+            "🎲 Факт — случайный факт о группе."
+        )
+
+        await edit_screen(
+            query,
+            text,
+        )
+        return
+
+    # Все остальные разделы работают только в группе.
+    if not callback_group_only(query):
+        await edit_screen(
+            query,
+            group_required_text(),
+        )
+        return
+
+    chat_id = query.message.chat.id
+
+    if action == "today":
+        await edit_screen(
+            query,
+            make_today_stats_text(chat_id),
+        )
+        return
+
+    if action == "me":
+        user = query.from_user
+
+        await edit_screen(
+            query,
+            make_me_stats_text(
+                chat_id,
+                user,
+            ),
+        )
+        return
+
+    if action == "week":
+        start_date, end_date = last_n_days(7)
+
+        await edit_screen(
+            query,
+            make_period_stats_text(
+                chat_id,
+                "🏆 Топ за 7 дней",
+                start_date,
+                end_date,
+            ),
+        )
+        return
+
+    if action == "month":
+        start_date, end_date = current_month_range()
+
+        await edit_screen(
+            query,
+            make_period_stats_text(
+                chat_id,
+                "🏆 Топ за месяц",
+                start_date,
+                end_date,
+            ),
+        )
+        return
+
+    if action == "group":
+        await edit_screen(
+            query,
+            make_group_stats_text(chat_id),
+        )
+        return
+
+    if action == "activity":
+        await edit_screen(
+            query,
+            make_activity_text(chat_id),
+        )
+        return
+
+    if action == "hours":
+        await edit_screen(
+            query,
+            make_hours_text(chat_id),
+        )
+        return
+
+    if action == "achievements":
+        await edit_screen(
+            query,
+            make_achievements_text(
+                chat_id,
+                query.from_user,
+            ),
+        )
+        return
+
+    if action == "records":
+        await edit_screen(
+            query,
+            make_records_text(chat_id),
+        )
+        return
+
+    if action == "fact":
+        await edit_screen(
+            query,
+            make_fact_text(chat_id),
+        )
+        return
+
+
+# ============================================================
+# ЗАПУСК
+# ============================================================
+
+def main():
+
+    init_database()
+
+    if TOKEN == "PASTE_NEW_TOKEN_HERE":
+        raise RuntimeError(
+            "Не задан BOT_TOKEN. "
+            "Установи переменную окружения BOT_TOKEN."
+        )
+
+    app = (
+        Application
+        .builder()
+        .token(TOKEN)
+        .build()
     )
 
+    # --------------------------------------------------------
+    # START
+    # --------------------------------------------------------
 
+    # /start оставлен только как первоначальная точка входа.
+    # После открытия меню всё управление идёт кнопками.
+    app.add_handler(
+        CommandHandler(
+            "start",
+            start,
+        )
+    )
+
+    # --------------------------------------------------------
+    # INLINE-КНОПКИ
+    # --------------------------------------------------------
+
+    app.add_handler(
+        CallbackQueryHandler(
+            button_handler,
+        )
+    )
+
+    # --------------------------------------------------------
+    # СООБЩЕНИЯ
+    # --------------------------------------------------------
+
+    app.add_handler(
+        MessageHandler(
+            (
+                filters.TEXT
+                |
+                filters.CAPTION
+            )
+            &
+            ~filters.COMMAND,
+            count_message,
+        )
+    )
+
+    # --------------------------------------------------------
+    # ОТЧЁТ В 20:00 ПО МОСКВЕ
+    # --------------------------------------------------------
+
+    app.job_queue.run_daily(
+        daily_report,
+        time=time(
+            hour=20,
+            minute=0,
+            tzinfo=MOSCOW,
+        ),
+    )
+
+    print("================================")
+    print("Бот запущен!")
+    print("Часовой пояс: Москва (UTC+3)")
+    print("Ежедневный отчёт: 20:00")
+    print("Управление: INLINE-КНОПКИ")
+    print("================================")
+
+    app.run_polling()
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+if __name__ == "__main__":
+    main()
 # ============================================================
 # ОБРАБОТКА СООБЩЕНИЙ
 # ============================================================
@@ -2061,7 +1925,8 @@ async def daily_report(
 
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=text
+                text=text,
+                reply_markup=main_menu_keyboard(),
             )
 
             print(
@@ -2078,192 +1943,4 @@ async def daily_report(
 
 
 # ============================================================
-# ЗАПУСК
-# ============================================================
 
-def main():
-
-    init_database()
-
-    if TOKEN == "PASTE_NEW_TOKEN_HERE":
-
-        raise RuntimeError(
-            "Не задан BOT_TOKEN. "
-            "Установи переменную окружения BOT_TOKEN."
-        )
-
-    app = (
-        Application
-        .builder()
-        .token(TOKEN)
-        .build()
-    )
-
-    # --------------------------------------------------------
-    # КОМАНДЫ
-    # --------------------------------------------------------
-
-    app.add_handler(
-        CommandHandler(
-            "start",
-            start
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "help",
-            help_command
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "stats",
-            stats
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "me",
-            me
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "week",
-            week
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "month",
-            month
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "group",
-            group
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "activity",
-            activity
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "hours",
-            hours
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "achievements",
-            achievements
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "records",
-            records
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "fact",
-            fact
-        )
-    )
-
-    # --------------------------------------------------------
-    # СООБЩЕНИЯ
-    # --------------------------------------------------------
-
-    app.add_handler(
-
-        MessageHandler(
-
-            (
-                filters.TEXT
-                |
-                filters.CAPTION
-            )
-            &
-            ~filters.COMMAND,
-
-            count_message
-        )
-    )
-
-    # --------------------------------------------------------
-    # ОТЧЁТ В 20:00 ПО МОСКВЕ
-    # --------------------------------------------------------
-
-    app.job_queue.run_daily(
-
-        daily_report,
-
-        time=time(
-            hour=20,
-            minute=0,
-            tzinfo=MOSCOW
-        )
-    )
-
-    print(
-        "================================"
-    )
-
-    print(
-        "Бот запущен!"
-    )
-
-    print(
-        "Часовой пояс: Москва (UTC+3)"
-    )
-
-    print(
-        "Ежедневный отчёт: 20:00"
-    )
-
-    print(
-        "Команды:"
-    )
-
-    print(
-        "/stats /me /week /month"
-    )
-
-    print(
-        "/group /activity /hours"
-    )
-
-    print(
-        "/achievements /records /fact"
-    )
-
-    print(
-        "================================"
-    )
-
-    app.run_polling()
-
-
-# ============================================================
-# MAIN
-# ============================================================
-
-if __name__ == "__main__":
-    main()
