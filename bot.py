@@ -2049,7 +2049,7 @@ def main():
 
         time=time(
             hour=20,
-            minute=12,
+            minute=15,
             tzinfo=MOSCOW
         )
     )
