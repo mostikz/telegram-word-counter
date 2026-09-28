@@ -1101,32 +1101,19 @@ MENU_HELP = "ℹ️ Помощь"
 
 
 def reply_keyboard():
-    """Постоянное меню прямо над полем ввода Telegram."""
+    """
+    Это именно Reply Keyboard Telegram.
+    Она появляется над полем ввода после отправки ботом
+    сообщения с reply_markup=ReplyKeyboardMarkup(...).
+    """
     return ReplyKeyboardMarkup(
         [
-            [
-                KeyboardButton(MENU_TODAY),
-                KeyboardButton(MENU_ME),
-            ],
-            [
-                KeyboardButton(MENU_WEEK),
-                KeyboardButton(MENU_MONTH),
-            ],
-            [
-                KeyboardButton(MENU_GROUP),
-                KeyboardButton(MENU_ACTIVITY),
-            ],
-            [
-                KeyboardButton(MENU_HOURS),
-                KeyboardButton(MENU_ACHIEVEMENTS),
-            ],
-            [
-                KeyboardButton(MENU_RECORDS),
-                KeyboardButton(MENU_FACT),
-            ],
-            [
-                KeyboardButton(MENU_HELP),
-            ],
+            ["📅 Сегодня", "👤 Моя статистика"],
+            ["🏆 7 дней", "🗓 Месяц"],
+            ["📊 Группа", "📈 Активность"],
+            ["🕐 По часам", "🏅 Достижения"],
+            ["🏆 Рекорды", "🎲 Факт"],
+            ["ℹ️ Помощь"],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
@@ -1135,19 +1122,38 @@ def reply_keyboard():
     )
 
 
+async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Отдельная команда /menu для принудительного показа клавиатуры.
+    Нужна как тест: если Telegram получил это сообщение,
+    Reply Keyboard должна отобразиться над полем ввода.
+    """
+    message = update.effective_message
+    if not message:
+        return
+
+    await message.reply_text(
+        "Меню бота 👇",
+        reply_markup=reply_keyboard(),
+    )
+
+
+
 async def start(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
+    message = update.effective_message
+    if not message:
+        return
 
-    await update.message.reply_text(
-        "Привет! 🤖\n\n"
-        "Я считаю статистику сообщений в чате.\n\n"
-        "Ниже появилось постоянное меню 👇\n"
-        "Выбирай нужный раздел кнопкой — меню останется "
-        "на месте и будет доступно в любой момент.",
+    await message.reply_text(
+        "Привет! 🤖\\n\\n"
+        "Ниже находится постоянное меню бота.\\n"
+        "Нажми нужную кнопку 👇",
         reply_markup=reply_keyboard(),
     )
+
 
 
 # ============================================================
@@ -2020,28 +2026,29 @@ async def reply_keyboard_handler(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-    """Обрабатывает кнопки постоянной Reply Keyboard.
-
-    Если пользователь написал обычный текст, передаём его
-    в старый обработчик статистики, чтобы логика подсчёта
-    сообщений полностью сохранилась.
     """
-
-    message = update.message
+    Обрабатывает нажатия Reply Keyboard.
+    Кнопка приходит как обычный текст.
+    """
+    message = update.effective_message
     if not message:
         return
 
-    # Кнопки Reply Keyboard приходят как обычный текст.
-    # Подписи к фото/видео и обычные сообщения по-прежнему
-    # передаём в старую статистическую логику.
-    text = (message.text or "").strip()
+    text_value = (message.text or "").strip()
 
-    if text not in MENU_HANDLERS:
-        await count_message(update, context)
+    if text_value in MENU_HANDLERS:
+        await MENU_HANDLERS[text_value](update, context)
+
+        # Повторно прикрепляем клавиатуру, чтобы она точно оставалась
+        # активной после ответа бота.
+        await message.reply_text(
+            "Меню 👇",
+            reply_markup=reply_keyboard(),
+        )
         return
 
-    handler = MENU_HANDLERS[text]
-    await handler(update, context)
+    await count_message(update, context)
+
 
 
 # ============================================================
@@ -2176,6 +2183,7 @@ async def daily_report(
 # ============================================================
 
 BOT_COMMANDS = [
+    BotCommand("menu", "Показать меню"),
     BotCommand("start", "Открыть постоянное меню"),
     BotCommand("stats", "Статистика за сегодня"),
     BotCommand("me", "Моя статистика"),
@@ -2192,10 +2200,28 @@ BOT_COMMANDS = [
 
 
 async def post_init(application: Application):
-    # Оставляем список команд Telegram для совместимости, но основное
-    # пользовательское меню — ReplyKeyboardMarkup прямо над полем ввода.
-    await application.bot.set_my_commands(BOT_COMMANDS)
-    print("Постоянная Reply Keyboard будет показана после /start.")
+    """
+    Настраивает системное меню Telegram, а /start и /menu
+    показывают именно Reply Keyboard над строкой ввода.
+
+    Важно: системное Menu Telegram и Reply Keyboard — это
+    два разных механизма. Reply Keyboard появляется только
+    после отправки сообщения с reply_markup.
+    """
+    from telegram import BotCommandScopeDefault, MenuButtonCommands
+
+    await application.bot.set_my_commands(
+        BOT_COMMANDS,
+        scope=BotCommandScopeDefault(),
+    )
+
+    await application.bot.set_chat_menu_button(
+        menu_button=MenuButtonCommands()
+    )
+
+    print("Системное Menu Telegram настроено.")
+    print("Reply Keyboard показывается командами /start и /menu.")
+
 
 
 # ============================================================
@@ -2365,7 +2391,7 @@ def main():
     )
 
     print(
-        "Меню появляется над полем ввода после /start"
+        "Reply Keyboard: /start или /menu"
     )
 
     print(
