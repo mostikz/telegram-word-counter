@@ -410,8 +410,8 @@ def get_stats(
         GROUP BY user_id
 
         ORDER BY
-            words DESC,
-            messages DESC
+            messages DESC,
+            words DESC
 
     """, (
         chat_id,
@@ -933,15 +933,16 @@ def stats_lines(
     rows,
     show_messages=False
 ):
-
+    """
+    Основной формат статистики:
+    имя — N сообщений (M слов)
+    """
     lines = []
 
     for position, row in enumerate(
         rows,
         start=1
     ):
-
-        user_id = row[0]
         user_name = row[1]
         messages = row[2]
         words = row[3]
@@ -949,15 +950,9 @@ def stats_lines(
         line = (
             f"{medal(position)} "
             f"{user_name} — "
-            f"{format_number(words)} слов"
+            f"{format_number(messages)} сообщений "
+            f"({format_number(words)} слов)"
         )
-
-        if show_messages:
-
-            line += (
-                f" · "
-                f"{format_number(messages)} сообщ."
-            )
 
         lines.append(line)
 
@@ -1016,11 +1011,9 @@ def make_today_stats_text(chat_id):
 
     result += (
         f"\n\n"
-        f"💬 Всего сообщений: "
-        f"{format_number(total_messages)}"
-        f"\n"
-        f"📝 Всего слов: "
-        f"{format_number(total_words)}"
+        f"💬 Всего: "
+        f"{format_number(total_messages)} сообщений "
+        f"({format_number(total_words)} слов)"
     )
 
     return result
@@ -1078,11 +1071,9 @@ def make_period_stats_text(
         f"👥 Активных участников: "
         f"{format_number(users)}"
         f"\n"
-        f"💬 Сообщений: "
-        f"{format_number(messages)}"
-        f"\n"
-        f"📝 Слов: "
-        f"{format_number(words)}"
+        f"💬 Всего: "
+        f"{format_number(messages)} сообщений "
+        f"({format_number(words)} слов)"
     )
 
     return result
@@ -1434,19 +1425,19 @@ async def me(
         f"👤 {user.full_name}\n\n"
 
         f"📅 Сегодня:\n"
-        f"📝 {format_number(words)} слов\n"
-        f"💬 {format_number(messages)} сообщений\n"
+        f"💬 {format_number(messages)} сообщений "
+        f"({format_number(words)} слов)\n"
         f"📊 {avg:.1f} слов/сообщение\n"
         f"🏆 Место: "
         f"{rank if rank else '—'}\n\n"
 
         f"📆 За 7 дней: "
-        f"{format_number(week_words)} слов / "
-        f"{format_number(week_messages)} сообщ.\n"
+        f"{format_number(week_messages)} сообщений "
+        f"({format_number(week_words)} слов)\n"
 
         f"🗓 За месяц: "
-        f"{format_number(month_words)} слов / "
-        f"{format_number(month_messages)} сообщ.\n\n"
+        f"{format_number(month_messages)} сообщений "
+        f"({format_number(month_words)} слов)\n\n"
 
         f"🔥 Серия сейчас: "
         f"{current_streak} дн.\n"
@@ -1640,9 +1631,9 @@ async def activity(
         for row in rows
     }
 
-    max_words = max(
+    max_messages = max(
         (
-            value[1]
+            value[0]
             for value in by_date.values()
         ),
         default=0
@@ -1671,8 +1662,9 @@ async def activity(
         lines.append(
 
             f"{d.strftime('%a %d.%m')}: "
-            f"{bar(words, max_words)} "
-            f"{format_number(words)} слов"
+            f"{bar(messages, max_messages)} "
+            f"{format_number(messages)} сообщений "
+            f"({format_number(words)} слов)"
         )
 
     await update.message.reply_text(
@@ -1718,9 +1710,9 @@ async def hours(
         for row in rows
     }
 
-    max_words = max(
+    max_messages = max(
         (
-            value[1]
+            value[0]
             for value in by_hour.values()
         ),
         default=0
@@ -1743,8 +1735,9 @@ async def hours(
         lines.append(
 
             f"{hour:02d}:00 "
-            f"{bar(words, max_words, 12)} "
-            f"{format_number(words)}"
+            f"{bar(messages, max_messages, 12)} "
+            f"{format_number(messages)} сообщений "
+            f"({format_number(words)} слов)"
         )
 
     await update.message.reply_text(
@@ -2265,9 +2258,15 @@ async def count_message(
     # Дополнительно проверяем старые поля для совместимости.
     # --------------------------------------------------------
 
+    # Новый Bot API: явные пересылки и автоматические пересылки
+    # из связанных каналов.
     if getattr(message, "forward_origin", None) is not None:
         return
 
+    if getattr(message, "is_automatic_forward", False):
+        return
+
+    # Старые поля Bot API (для совместимости).
     if (
         getattr(message, "forward_from", None) is not None
         or
