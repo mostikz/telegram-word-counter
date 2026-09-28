@@ -907,7 +907,6 @@ def reply_keyboard():
         resize_keyboard=True,
         one_time_keyboard=False,
         is_persistent=True,
-        input_field_placeholder="Выбери раздел 👇",
     )
 
 async def get_saved_menu_message_id(chat_id: int):
@@ -1661,6 +1660,10 @@ async def reply_keyboard_handler(
     text_value = (message.text or "").strip()
 
     if text_value in MENU_HANDLERS:
+        # Удаляем сообщение пользователя с названием нажатой кнопки,
+        # чтобы в группе оставался только ответ бота.
+        await delete_menu_message_if_needed(message)
+
         await MENU_HANDLERS[text_value](update, context)
 
         return
