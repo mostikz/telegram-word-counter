@@ -1,5 +1,4 @@
 import os
-import re
 import sqlite3
 from datetime import datetime, time, timezone, timedelta, date
 
@@ -219,18 +218,6 @@ def current_month_range():
 # ПОДСЧЁТ СЛОВ
 # ============================================================
 
-def count_words(text):
-
-    if not text:
-        return 0
-
-    words = re.findall(
-        r"[^\W_]+(?:[-'][^\W_]+)*",
-        text,
-        flags=re.UNICODE
-    )
-
-    return len(words)
 
 
 # ============================================================
@@ -241,19 +228,13 @@ def save_message(
     chat_id,
     user_id,
     user_name,
-    words,
-    characters,
     hour
 ):
-
+    """Сохраняет только одно отправленное сообщение."""
     today = today_str()
 
     db = get_db()
     cursor = db.cursor()
-
-    # --------------------------------------------------------
-    # Дневная статистика
-    # --------------------------------------------------------
 
     cursor.execute("""
         INSERT INTO daily_stats (
@@ -267,59 +248,26 @@ def save_message(
             longest_message_words,
             longest_message_chars
         )
-
         VALUES (
             ?, ?, ?, ?,
             1,
-            ?, ?,
-            ?, ?
+            0, 0,
+            0, 0
         )
-
         ON CONFLICT(
             chat_id,
             user_id,
             date
         )
-
         DO UPDATE SET
-
-            user_name =
-                excluded.user_name,
-
-            messages =
-                messages + 1,
-
-            words =
-                words + excluded.words,
-
-            characters =
-                characters + excluded.characters,
-
-            longest_message_words =
-                MAX(
-                    longest_message_words,
-                    excluded.longest_message_words
-                ),
-
-            longest_message_chars =
-                MAX(
-                    longest_message_chars,
-                    excluded.longest_message_chars
-                )
+            user_name = excluded.user_name,
+            messages = messages + 1
     """, (
         chat_id,
         user_id,
         user_name,
         today,
-        words,
-        characters,
-        words,
-        characters,
     ))
-
-    # --------------------------------------------------------
-    # Статистика по часам
-    # --------------------------------------------------------
 
     cursor.execute("""
         INSERT INTO hourly_stats (
@@ -330,38 +278,30 @@ def save_message(
             messages,
             words
         )
-
         VALUES (
             ?, ?, ?, ?,
             1,
-            ?
+            0
         )
-
         ON CONFLICT(
             chat_id,
             user_id,
             date,
             hour
         )
-
         DO UPDATE SET
-
-            messages =
-                messages + 1,
-
-            words =
-                words + excluded.words
-
+            messages = messages + 1
     """, (
         chat_id,
         user_id,
         today,
         hour,
-        words,
     ))
 
     db.commit()
     db.close()
+
+
 
 
 # ============================================================
@@ -373,46 +313,19 @@ def get_stats(
     start_date,
     end_date
 ):
-
     db = get_db()
     cursor = db.cursor()
 
     cursor.execute("""
         SELECT
-
             user_id,
-
-            MAX(user_name)
-                AS user_name,
-
+            MAX(user_name),
             SUM(messages)
-                AS messages,
-
-            SUM(words)
-                AS words,
-
-            SUM(characters)
-                AS characters,
-
-            MAX(longest_message_words)
-                AS longest_message_words,
-
-            MAX(longest_message_chars)
-                AS longest_message_chars
-
         FROM daily_stats
-
         WHERE chat_id = ?
-
-          AND date BETWEEN ?
-          AND ?
-
+          AND date BETWEEN ? AND ?
         GROUP BY user_id
-
-        ORDER BY
-            messages DESC,
-            words DESC
-
+        ORDER BY messages DESC, user_id ASC
     """, (
         chat_id,
         date_str(start_date),
@@ -420,10 +333,20 @@ def get_stats(
     ))
 
     rows = cursor.fetchall()
-
     db.close()
 
-    return rows
+    return [
+        (
+            row[0],
+            row[1],
+            row[2],
+            0,
+            0,
+            0,
+            0,
+        )
+        for row in rows
+    ]
 
 
 def get_user_stats(
@@ -432,45 +355,15 @@ def get_user_stats(
     start_date,
     end_date
 ):
-
     db = get_db()
     cursor = db.cursor()
 
     cursor.execute("""
-        SELECT
-
-            COALESCE(
-                SUM(messages),
-                0
-            ),
-
-            COALESCE(
-                SUM(words),
-                0
-            ),
-
-            COALESCE(
-                SUM(characters),
-                0
-            ),
-
-            COALESCE(
-                MAX(longest_message_words),
-                0
-            ),
-
-            COALESCE(
-                MAX(longest_message_chars),
-                0
-            )
-
+        SELECT COALESCE(SUM(messages), 0)
         FROM daily_stats
-
         WHERE chat_id = ?
           AND user_id = ?
-          AND date BETWEEN ?
-          AND ?
-
+          AND date BETWEEN ? AND ?
     """, (
         chat_id,
         user_id,
@@ -478,11 +371,16 @@ def get_user_stats(
         date_str(end_date)
     ))
 
-    row = cursor.fetchone()
-
+    messages = cursor.fetchone()[0]
     db.close()
 
-    return row
+    return (
+        messages,
+        0,
+        0,
+        0,
+        0,
+    )
 
 
 def get_rank(
@@ -491,18 +389,13 @@ def get_rank(
     start_date,
     end_date
 ):
-
     rows = get_stats(
         chat_id,
         start_date,
         end_date
     )
 
-    for position, row in enumerate(
-        rows,
-        start=1
-    ):
-
+    for position, row in enumerate(rows, start=1):
         if row[0] == user_id:
             return position
 
@@ -514,44 +407,37 @@ def get_group_totals(
     start_date,
     end_date
 ):
-
     db = get_db()
     cursor = db.cursor()
 
     cursor.execute("""
         SELECT
-
-            COALESCE(
-                SUM(messages),
-                0
-            ),
-
-            COALESCE(
-                SUM(words),
-                0
-            ),
-
-            COUNT(
-                DISTINCT user_id
-            )
-
+            COALESCE(SUM(messages), 0),
+            COUNT(DISTINCT user_id)
         FROM daily_stats
-
         WHERE chat_id = ?
-          AND date BETWEEN ?
-          AND ?
-
+          AND date BETWEEN ? AND ?
     """, (
         chat_id,
         date_str(start_date),
         date_str(end_date)
     ))
 
-    row = cursor.fetchone()
-
+    messages, users = cursor.fetchone()
     db.close()
 
-    return row
+    return (
+        messages,
+        0,
+        users,
+    )
+
+
+
+
+# ============================================================
+# АКТИВНОСТЬ ПО ДНЯМ
+# ============================================================
 
 
 # ============================================================
@@ -563,30 +449,18 @@ def get_daily_group_activity(
     start_date,
     end_date
 ):
-
     db = get_db()
     cursor = db.cursor()
 
     cursor.execute("""
         SELECT
-
             date,
-
-            SUM(messages),
-
-            SUM(words)
-
+            SUM(messages)
         FROM daily_stats
-
         WHERE chat_id = ?
-
-          AND date BETWEEN ?
-          AND ?
-
+          AND date BETWEEN ? AND ?
         GROUP BY date
-
         ORDER BY date
-
     """, (
         chat_id,
         date_str(start_date),
@@ -594,45 +468,31 @@ def get_daily_group_activity(
     ))
 
     rows = cursor.fetchall()
-
     db.close()
 
-    return rows
+    return [
+        (row[0], row[1], 0)
+        for row in rows
+    ]
 
-
-# ============================================================
-# АКТИВНОСТЬ ПО ЧАСАМ
-# ============================================================
 
 def get_hourly_activity(
     chat_id,
     start_date,
     end_date
 ):
-
     db = get_db()
     cursor = db.cursor()
 
     cursor.execute("""
         SELECT
-
             hour,
-
-            SUM(messages),
-
-            SUM(words)
-
+            SUM(messages)
         FROM hourly_stats
-
         WHERE chat_id = ?
-
-          AND date BETWEEN ?
-          AND ?
-
+          AND date BETWEEN ? AND ?
         GROUP BY hour
-
         ORDER BY hour
-
     """, (
         chat_id,
         date_str(start_date),
@@ -640,10 +500,14 @@ def get_hourly_activity(
     ))
 
     rows = cursor.fetchall()
-
     db.close()
 
-    return rows
+    return [
+        (row[0], row[1], 0)
+        for row in rows
+    ]
+
+
 
 
 # ============================================================
@@ -690,77 +554,30 @@ def get_night_messages(
 # ============================================================
 
 def get_best_records(chat_id):
-
     db = get_db()
     cursor = db.cursor()
-
-    # Больше всего слов за день
-
-    cursor.execute("""
-        SELECT
-            user_name,
-            words,
-            date
-
-        FROM daily_stats
-
-        WHERE chat_id = ?
-
-        ORDER BY words DESC
-
-        LIMIT 1
-    """, (chat_id,))
-
-    best_words = cursor.fetchone()
-
-    # Больше всего сообщений за день
 
     cursor.execute("""
         SELECT
             user_name,
             messages,
             date
-
         FROM daily_stats
-
         WHERE chat_id = ?
-
-        ORDER BY messages DESC
-
+        ORDER BY messages DESC, date ASC
         LIMIT 1
     """, (chat_id,))
 
     best_messages = cursor.fetchone()
-
-    # Самое длинное сообщение
-
-    cursor.execute("""
-        SELECT
-            user_name,
-            longest_message_words,
-            longest_message_chars,
-            date
-
-        FROM daily_stats
-
-        WHERE chat_id = ?
-
-        ORDER BY
-            longest_message_words DESC,
-            longest_message_chars DESC
-
-        LIMIT 1
-    """, (chat_id,))
-
-    longest_message = cursor.fetchone()
-
     db.close()
 
     return (
-        best_words,
+        None,
         best_messages,
-        longest_message
+        None,
     )
+
+
 
 
 # ============================================================
@@ -933,30 +750,21 @@ def stats_lines(
     rows,
     show_messages=False
 ):
-    """
-    Основной формат статистики:
-    имя — N сообщений (M слов)
-    """
     lines = []
 
     for position, row in enumerate(
         rows,
         start=1
     ):
-        user_name = row[1]
-        messages = row[2]
-        words = row[3]
-
-        line = (
+        lines.append(
             f"{medal(position)} "
-            f"{user_name} — "
-            f"{format_number(messages)} сообщений "
-            f"({format_number(words)} слов)"
+            f"{row[1]} — "
+            f"{format_number(row[2])} сообщений"
         )
 
-        lines.append(line)
-
     return lines
+
+
 
 
 def group_only(update):
@@ -974,7 +782,6 @@ def group_only(update):
 # ============================================================
 
 def make_today_stats_text(chat_id):
-
     today = moscow_now().date()
 
     rows = get_stats(
@@ -984,39 +791,32 @@ def make_today_stats_text(chat_id):
     )
 
     result = (
-        f"📅 Напиздели за сегодня\n\n"
+        f"📅 Сообщения за сегодня\n\n"
         f"{pretty_date(today)}\n\n"
     )
 
     if not rows:
-
-        return (
-            result
-            +
-            "Пока никто ничего "
-            "не напиздел 😄"
-        )
-
-    total_messages, total_words, _ = (
-        get_group_totals(
-            chat_id,
-            today,
-            today
-        )
-    )
+        return result + "Пока сообщений нет 😄"
 
     result += "\n".join(
         stats_lines(rows)
     )
 
+    total_messages, _, _ = get_group_totals(
+        chat_id,
+        today,
+        today
+    )
+
     result += (
         f"\n\n"
-        f"💬 Всего: "
-        f"{format_number(total_messages)} сообщений "
-        f"({format_number(total_words)} слов)"
+        f"💬 Всего сообщений: "
+        f"{format_number(total_messages)}"
     )
 
     return result
+
+
 
 
 # ============================================================
@@ -1029,7 +829,6 @@ def make_period_stats_text(
     start_date,
     end_date
 ):
-
     rows = get_stats(
         chat_id,
         start_date,
@@ -1038,32 +837,21 @@ def make_period_stats_text(
 
     result = (
         f"{title}\n\n"
-        f"📅 "
-        f"{format_period(start_date, end_date)}"
+        f"📅 {format_period(start_date, end_date)}"
         f"\n\n"
     )
 
     if not rows:
-
-        return (
-            result
-            +
-            "Пока статистики нет 😄"
-        )
+        return result + "Пока статистики нет 😄"
 
     result += "\n".join(
-        stats_lines(
-            rows,
-            show_messages=True
-        )
+        stats_lines(rows)
     )
 
-    messages, words, users = (
-        get_group_totals(
-            chat_id,
-            start_date,
-            end_date
-        )
+    messages, _, users = get_group_totals(
+        chat_id,
+        start_date,
+        end_date
     )
 
     result += (
@@ -1071,12 +859,13 @@ def make_period_stats_text(
         f"👥 Активных участников: "
         f"{format_number(users)}"
         f"\n"
-        f"💬 Всего: "
-        f"{format_number(messages)} сообщений "
-        f"({format_number(words)} слов)"
+        f"💬 Всего сообщений: "
+        f"{format_number(messages)}"
     )
 
     return result
+
+
 
 
 # ============================================================
@@ -1325,40 +1114,38 @@ async def me(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-
     if not group_only(update):
-
         await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
+            "Эту команду нужно использовать в группе."
         )
-
         return
 
     chat_id = update.effective_chat.id
     user = update.effective_user
 
     today = moscow_now().date()
-
     start_7, _ = last_n_days(7)
+    start_month, end_month = current_month_range()
 
-    start_month, end_month = (
-        current_month_range()
-    )
-
-    # Сегодня
-
-    (
-        messages,
-        words,
-        characters,
-        longest_words,
-        longest_chars
-    ) = get_user_stats(
+    messages, _, _, _, _ = get_user_stats(
         chat_id,
         user.id,
         today,
         today
+    )
+
+    week_messages, _, _, _, _ = get_user_stats(
+        chat_id,
+        user.id,
+        start_7,
+        today
+    )
+
+    month_messages, _, _, _, _ = get_user_stats(
+        chat_id,
+        user.id,
+        start_month,
+        end_month
     )
 
     rank = get_rank(
@@ -1368,93 +1155,30 @@ async def me(
         today
     )
 
-    # Неделя
-
-    (
-        week_messages,
-        week_words,
-        _,
-        _,
-        _
-    ) = get_user_stats(
+    current_streak, best_streak = get_streaks(
         chat_id,
-        user.id,
-        start_7,
-        today
+        user.id
     )
-
-    # Месяц
-
-    (
-        month_messages,
-        month_words,
-        _,
-        _,
-        _
-    ) = get_user_stats(
-        chat_id,
-        user.id,
-        start_month,
-        end_month
-    )
-
-    # Серии
-
-    current_streak, best_streak = (
-        get_streaks(
-            chat_id,
-            user.id
-        )
-    )
-
-    # Ночь
 
     night = get_night_messages(
         chat_id,
         user.id
     )
 
-    avg = (
-        words / messages
-        if messages
-        else 0
-    )
-
     text = (
-
         f"👤 {user.full_name}\n\n"
-
-        f"📅 Сегодня:\n"
-        f"💬 {format_number(messages)} сообщений "
-        f"({format_number(words)} слов)\n"
-        f"📊 {avg:.1f} слов/сообщение\n"
-        f"🏆 Место: "
-        f"{rank if rank else '—'}\n\n"
-
-        f"📆 За 7 дней: "
-        f"{format_number(week_messages)} сообщений "
-        f"({format_number(week_words)} слов)\n"
-
-        f"🗓 За месяц: "
-        f"{format_number(month_messages)} сообщений "
-        f"({format_number(month_words)} слов)\n\n"
-
-        f"🔥 Серия сейчас: "
-        f"{current_streak} дн.\n"
-
-        f"🏅 Лучшая серия: "
-        f"{best_streak} дн.\n"
-
-        f"🌙 Ночных сообщений: "
-        f"{format_number(night)}\n"
-
-        f"📜 Самое длинное сегодня: "
-        f"{format_number(longest_words)} слов"
+        f"📅 Сегодня: {format_number(messages)} сообщений\n"
+        f"🏆 Место сегодня: {rank if rank else '—'}\n\n"
+        f"📆 За 7 дней: {format_number(week_messages)} сообщений\n"
+        f"🗓 За месяц: {format_number(month_messages)} сообщений\n\n"
+        f"🔥 Серия сейчас: {current_streak} дн.\n"
+        f"🏅 Лучшая серия: {best_streak} дн.\n"
+        f"🌙 Ночных сообщений: {format_number(night)}"
     )
 
-    await update.message.reply_text(
-        text
-    )
+    await update.message.reply_text(text)
+
+
 
 
 # ============================================================
@@ -1531,32 +1255,21 @@ async def group(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-
     if not group_only(update):
-
         await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
+            "Эту команду нужно использовать в группе."
         )
-
         return
 
     chat_id = update.effective_chat.id
 
-    start_date = date(
-        2000,
-        1,
-        1
-    )
-
+    start_date = date(2000, 1, 1)
     end_date = moscow_now().date()
 
-    messages, words, users = (
-        get_group_totals(
-            chat_id,
-            start_date,
-            end_date
-        )
+    messages, _, users = get_group_totals(
+        chat_id,
+        start_date,
+        end_date
     )
 
     top = get_stats(
@@ -1566,31 +1279,21 @@ async def group(
     )[:1]
 
     text = (
-
         "📊 Наша группа\n\n"
-
-        f"👥 Активных участников: "
-        f"{format_number(users)}\n"
-
-        f"💬 Сообщений за всё время: "
-        f"{format_number(messages)}\n"
-
-        f"📝 Слов за всё время: "
-        f"{format_number(words)}\n"
+        f"👥 Активных участников: {format_number(users)}\n"
+        f"💬 Сообщений за всё время: {format_number(messages)}"
     )
 
     if top:
-
         text += (
-            "\n"
-            "👑 Главный болтун:\n"
-            f"{top[0][1]} — "
-            f"{format_number(top[0][3])} слов"
+            "\n\n"
+            "👑 Самый активный участник:\n"
+            f"{top[0][1]} — {format_number(top[0][2])} сообщений"
         )
 
-    await update.message.reply_text(
-        text
-    )
+    await update.message.reply_text(text)
+
+
 
 
 # ============================================================
@@ -1601,21 +1304,14 @@ async def activity(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-
     if not group_only(update):
-
         await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
+            "Эту команду нужно использовать в группе."
         )
-
         return
 
     chat_id = update.effective_chat.id
-
-    start_date, end_date = (
-        last_n_days(7)
-    )
+    start_date, end_date = last_n_days(7)
 
     rows = get_daily_group_activity(
         chat_id,
@@ -1624,18 +1320,12 @@ async def activity(
     )
 
     by_date = {
-        row[0]: (
-            row[1],
-            row[2]
-        )
+        row[0]: row[1]
         for row in rows
     }
 
     max_messages = max(
-        (
-            value[0]
-            for value in by_date.values()
-        ),
+        by_date.values(),
         default=0
     )
 
@@ -1645,31 +1335,23 @@ async def activity(
     ]
 
     for i in range(7):
-
-        d = (
-            start_date
-            +
-            timedelta(days=i)
-        )
-
-        messages, words = (
-            by_date.get(
-                date_str(d),
-                (0, 0)
-            )
+        d = start_date + timedelta(days=i)
+        messages = by_date.get(
+            date_str(d),
+            0
         )
 
         lines.append(
-
             f"{d.strftime('%a %d.%m')}: "
             f"{bar(messages, max_messages)} "
-            f"{format_number(messages)} сообщений "
-            f"({format_number(words)} слов)"
+            f"{format_number(messages)} сообщений"
         )
 
     await update.message.reply_text(
         "\n".join(lines)
     )
+
+
 
 
 # ============================================================
@@ -1680,21 +1362,14 @@ async def hours(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-
     if not group_only(update):
-
         await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
+            "Эту команду нужно использовать в группе."
         )
-
         return
 
     chat_id = update.effective_chat.id
-
-    start_date, end_date = (
-        last_n_days(7)
-    )
+    start_date, end_date = last_n_days(7)
 
     rows = get_hourly_activity(
         chat_id,
@@ -1703,18 +1378,12 @@ async def hours(
     )
 
     by_hour = {
-        row[0]: (
-            row[1],
-            row[2]
-        )
+        row[0]: row[1]
         for row in rows
     }
 
     max_messages = max(
-        (
-            value[0]
-            for value in by_hour.values()
-        ),
+        by_hour.values(),
         default=0
     )
 
@@ -1724,25 +1393,19 @@ async def hours(
     ]
 
     for hour in range(24):
-
-        messages, words = (
-            by_hour.get(
-                hour,
-                (0, 0)
-            )
-        )
+        messages = by_hour.get(hour, 0)
 
         lines.append(
-
             f"{hour:02d}:00 "
             f"{bar(messages, max_messages, 12)} "
-            f"{format_number(messages)} сообщений "
-            f"({format_number(words)} слов)"
+            f"{format_number(messages)} сообщений"
         )
 
     await update.message.reply_text(
         "\n".join(lines)
     )
+
+
 
 
 # ============================================================
@@ -1753,45 +1416,26 @@ async def achievements(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-
     if not group_only(update):
-
         await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
+            "Эту команду нужно использовать в группе."
         )
-
         return
 
     chat_id = update.effective_chat.id
     user = update.effective_user
+    today = moscow_now().date()
 
-    start_date = date(
-        2000,
-        1,
-        1
-    )
-
-    end_date = moscow_now().date()
-
-    (
-        messages,
-        words,
-        characters,
-        longest_words,
-        longest_chars
-    ) = get_user_stats(
+    messages, _, _, _, _ = get_user_stats(
         chat_id,
         user.id,
-        start_date,
-        end_date
+        date(2000, 1, 1),
+        today
     )
 
-    current_streak, best_streak = (
-        get_streaks(
-            chat_id,
-            user.id
-        )
+    current_streak, best_streak = get_streaks(
+        chat_id,
+        user.id
     )
 
     night = get_night_messages(
@@ -1801,107 +1445,56 @@ async def achievements(
 
     achievements_list = []
 
-    # --------------------------------------------------------
-    # Слова
-    # --------------------------------------------------------
-
-    if words >= 10_000:
-
+    if messages >= 100:
         achievements_list.append(
-            "🗣️ Болтун — 10 000 слов"
+            "💬 Разговорился — 100 сообщений"
         )
-
-    if words >= 50_000:
-
-        achievements_list.append(
-            "📚 Писатель — 50 000 слов"
-        )
-
-    if words >= 100_000:
-
-        achievements_list.append(
-            "📖 Летописец — 100 000 слов"
-        )
-
-    # --------------------------------------------------------
-    # Сообщения
-    # --------------------------------------------------------
 
     if messages >= 500:
-
         achievements_list.append(
-            "💬 Не замолкает — "
-            "500 сообщений"
+            "🔥 Не замолкает — 500 сообщений"
         )
 
-    if messages >= 1_000:
-
+    if messages >= 1000:
         achievements_list.append(
-            "⚡ Марафонец — "
-            "1 000 сообщений"
+            "⚡ Марафонец — 1 000 сообщений"
         )
 
-    # --------------------------------------------------------
-    # Длинные сообщения
-    # --------------------------------------------------------
-
-    if longest_words >= 1_000:
-
+    if messages >= 5000:
         achievements_list.append(
-            "📜 Простыня — "
-            "сообщение на 1 000+ слов"
+            "🚀 Турборежим — 5 000 сообщений"
         )
-
-    # --------------------------------------------------------
-    # Ночь
-    # --------------------------------------------------------
 
     if night >= 100:
-
         achievements_list.append(
-            "🌙 Ночной житель — "
-            "100 ночных сообщений"
+            "🌙 Ночной житель — 100 ночных сообщений"
         )
 
-    # --------------------------------------------------------
-    # Серия
-    # --------------------------------------------------------
-
     if best_streak >= 7:
-
         achievements_list.append(
-            "🔥 Серия — "
-            "7 дней подряд"
+            "🔥 Серия — 7 дней подряд"
         )
 
     if best_streak >= 30:
-
         achievements_list.append(
-            "🔥🔥 Месяц без молчания — "
-            "30 дней подряд"
+            "🔥🔥 Месяц без молчания — 30 дней подряд"
         )
 
     if not achievements_list:
-
         text = (
             "🏅 Достижения\n\n"
             "Пока достижений нет. "
-            "Начинай напиздеть 😄"
+            "Отправляй сообщения 😄"
         )
-
     else:
-
         text = (
             "🏅 Твои достижения\n\n"
-            +
-            "\n".join(
-                achievements_list
-            )
+            + "\n".join(achievements_list)
         )
 
-    await update.message.reply_text(
-        text
-    )
+    await update.message.reply_text(text)
+
+
 
 
 # ============================================================
@@ -1912,81 +1505,38 @@ async def records(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-
     if not group_only(update):
-
         await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
+            "Эту команду нужно использовать в группе."
         )
-
         return
 
-    (
-        best_words,
-        best_messages,
-        longest_message
-    ) = get_best_records(
+    _, best_messages, _ = get_best_records(
         update.effective_chat.id
     )
 
     lines = [
-        "🏆 Рекорды группы",
+        "🏆 Рекорд группы",
         ""
     ]
 
-    # --------------------------------------------------------
-    # Рекорд слов
-    # --------------------------------------------------------
-
-    if best_words:
-
-        lines.append(
-
-            "📝 Больше всего слов за день:\n"
-            f"{best_words[0]} — "
-            f"{format_number(best_words[1])} слов "
-            f"({best_words[2]})"
-        )
-
-    # --------------------------------------------------------
-    # Рекорд сообщений
-    # --------------------------------------------------------
-
     if best_messages:
-
         lines.append(
-
-            "\n💬 Больше всего сообщений за день:\n"
+            "💬 Больше всего сообщений за день:"
+        )
+        lines.append(
             f"{best_messages[0]} — "
             f"{format_number(best_messages[1])} сообщений "
             f"({best_messages[2]})"
         )
-
-    # --------------------------------------------------------
-    # Самое длинное сообщение
-    # --------------------------------------------------------
-
-    if longest_message:
-
-        lines.append(
-
-            "\n📜 Самое длинное сообщение:\n"
-            f"{longest_message[0]} — "
-            f"{format_number(longest_message[1])} слов / "
-            f"{format_number(longest_message[2])} символов "
-            f"({longest_message[3]})"
-        )
-
-    if len(lines) == 2:
-
-        lines.append(
-            "Рекордов пока нет 😄"
-        )
+    else:
+        lines.append("Рекордов пока нет 😄")
 
     await update.message.reply_text(
         "\n".join(lines)
     )
+
+
 
 
 # ============================================================
@@ -1997,26 +1547,16 @@ async def fact(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-
     if not group_only(update):
-
         await update.message.reply_text(
-            "Эту команду нужно "
-            "использовать в группе."
+            "Эту команду нужно использовать в группе."
         )
-
         return
 
     import random
 
     chat_id = update.effective_chat.id
-
-    start_date = date(
-        2000,
-        1,
-        1
-    )
-
+    start_date = date(2000, 1, 1)
     end_date = moscow_now().date()
 
     rows = get_stats(
@@ -2026,103 +1566,42 @@ async def fact(
     )
 
     if not rows:
-
         await update.message.reply_text(
-            "🤔 Пока мало данных "
-            "для фактов."
+            "🤔 Пока мало данных для фактов."
         )
-
         return
 
     facts = []
 
-    # --------------------------------------------------------
-    # Главный болтун
-    # --------------------------------------------------------
-
     top = rows[0]
-
     facts.append(
-
-        f"👑 {top[1]} — "
-        f"главный болтун группы: "
-        f"{format_number(top[3])} "
-        f"слов за всё время."
+        f"👑 {top[1]} — самый активный участник: "
+        f"{format_number(top[2])} сообщений за всё время."
     )
 
-    # --------------------------------------------------------
-    # Самый длинный текст
-    # --------------------------------------------------------
-
-    longest = max(
-        rows,
-        key=lambda row: row[5]
-    )
-
-    if longest[5]:
-
-        facts.append(
-
-            f"📜 {longest[1]} "
-            f"однажды написал(а) "
-            f"{format_number(longest[5])} "
-            f"слов за день в одном сообщении."
-        )
-
-    # --------------------------------------------------------
-    # Участники
-    # --------------------------------------------------------
-
-    messages, words, users = (
-        get_group_totals(
-            chat_id,
-            start_date,
-            end_date
-        )
+    messages, _, users = get_group_totals(
+        chat_id,
+        start_date,
+        end_date
     )
 
     if users:
-
         facts.append(
-
-            f"👥 В статистике группы "
-            f"уже есть "
-            f"{format_number(users)} "
-            f"активных участников."
+            f"👥 В статистике группы уже есть "
+            f"{format_number(users)} активных участников."
         )
 
-    # --------------------------------------------------------
-    # Сообщения
-    # --------------------------------------------------------
-
-    if messages:
-
-        facts.append(
-
-            f"💬 Всего группа отправила "
-            f"{format_number(messages)} "
-            f"сообщений."
-        )
-
-    # --------------------------------------------------------
-    # Слова
-    # --------------------------------------------------------
-
-    if words:
-
-        facts.append(
-
-            f"📝 Всего группа написала "
-            f"{format_number(words)} "
-            f"слов."
-        )
+    facts.append(
+        f"💬 Всего группа отправила "
+        f"{format_number(messages)} сообщений."
+    )
 
     await update.message.reply_text(
-
         "🎲 Факт дня\n\n"
-        +
-        random.choice(facts)
+        + random.choice(facts)
     )
+
+
 
 
 # Кнопка -> существующий обработчик.
@@ -2237,46 +1716,10 @@ async def count_message(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-
-    message = update.message
+    message = update.effective_message
 
     if not message:
         return
-
-    if not message.from_user:
-        return
-
-    # Не считаем ботов
-    if message.from_user.is_bot:
-        return
-
-    # --------------------------------------------------------
-    # ПЕРЕСЛАННЫЕ СООБЩЕНИЯ НЕ СЧИТАЕМ
-    #
-    # В современных версиях python-telegram-bot Telegram
-    # передаёт источник пересылки через forward_origin.
-    # Дополнительно проверяем старые поля для совместимости.
-    # --------------------------------------------------------
-
-    # Новый Bot API: явные пересылки и автоматические пересылки
-    # из связанных каналов.
-    if getattr(message, "forward_origin", None) is not None:
-        return
-
-    if getattr(message, "is_automatic_forward", False):
-        return
-
-    # Старые поля Bot API (для совместимости).
-    if (
-        getattr(message, "forward_from", None) is not None
-        or
-        getattr(message, "forward_from_chat", None) is not None
-        or
-        getattr(message, "forward_sender_name", None) is not None
-    ):
-        return
-
-    # Только группы
 
     if message.chat.type not in (
         "group",
@@ -2284,51 +1727,74 @@ async def count_message(
     ):
         return
 
-    text = (
-        message.text
-        or
-        message.caption
-        or
-        ""
-    )
-
-    # --------------------------------------------------------
-    # Команды не считаем как обычные сообщения.
-    # --------------------------------------------------------
-
-    if text.lstrip().startswith("/"):
+    if not message.from_user:
         return
 
-    words = count_words(text)
+    if message.from_user.is_bot:
+        return
 
-    characters = len(text)
+    # Любая пересылка не считается.
+    if getattr(message, "forward_origin", None) is not None:
+        return
 
-    # Час по Москве
+    # Автоматические пересылки из каналов в привязанную группу не считаются.
+    if getattr(message, "is_automatic_forward", False):
+        return
 
-    message_time = (
-        message.date.astimezone(
-            MOSCOW
-        )
+    # Совместимость со старыми версиями Bot API.
+    if (
+        getattr(message, "forward_from", None) is not None
+        or getattr(message, "forward_from_chat", None) is not None
+        or getattr(message, "forward_sender_name", None) is not None
+    ):
+        return
+
+    # Команды не считаются.
+    if (
+        message.text
+        and message.text.lstrip().startswith("/")
+    ):
+        return
+
+    # Сообщения с содержимым пользователя.
+    content_fields = (
+        "text",
+        "caption",
+        "audio",
+        "document",
+        "animation",
+        "game",
+        "photo",
+        "sticker",
+        "video",
+        "voice",
+        "video_note",
+        "contact",
+        "location",
+        "venue",
+        "poll",
+        "dice",
+        "story",
+        "paid_media",
+        "checklist",
     )
+
+    if not any(
+        getattr(message, field, None) is not None
+        for field in content_fields
+    ):
+        return
+
+    message_time = message.date.astimezone(MOSCOW)
 
     save_message(
-
         chat_id=message.chat.id,
-
-        user_id=(
-            message.from_user.id
-        ),
-
-        user_name=(
-            message.from_user.full_name
-        ),
-
-        words=words,
-
-        characters=characters,
-
-        hour=message_time.hour
+        user_id=message.from_user.id,
+        user_name=message.from_user.full_name,
+        hour=message_time.hour,
     )
+
+
 
 
 # ============================================================
@@ -2564,12 +2030,10 @@ def main():
         MessageHandler(
 
             (
-                filters.TEXT
-                |
-                filters.CAPTION
-            )
-            &
-            ~filters.COMMAND,
+                filters.ALL
+                &
+                ~filters.COMMAND
+            ),
 
             reply_keyboard_handler
         )
