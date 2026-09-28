@@ -1660,11 +1660,14 @@ async def reply_keyboard_handler(
     text_value = (message.text or "").strip()
 
     if text_value in MENU_HANDLERS:
-        # Удаляем сообщение пользователя с названием нажатой кнопки,
+        # Сначала отправляем ответ.
+        # Обработчики используют update.message.reply_text(), поэтому
+        # удалять сообщение пользователя до их выполнения нельзя.
+        await MENU_HANDLERS[text_value](update, context)
+
+        # После успешной обработки удаляем сообщение с названием кнопки,
         # чтобы в группе оставался только ответ бота.
         await delete_menu_message_if_needed(message)
-
-        await MENU_HANDLERS[text_value](update, context)
 
         return
 
@@ -1881,6 +1884,33 @@ BOT_COMMANDS = [
 ]
 
 
+async def refresh_existing_group_menus(application: Application):
+    """
+    После перезапуска бота обновляет Reply Keyboard во всех уже известных
+    группах. Это нужно, чтобы Telegram получил новую клавиатуру без старого
+    input_field_placeholder (например, «Выбери раздел 👇»).
+    """
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT chat_id FROM bot_menu_messages")
+    chat_ids = [row[0] for row in cursor.fetchall()]
+    db.close()
+
+    for chat_id in chat_ids:
+        try:
+            await send_group_menu(
+                application.bot,
+                chat_id,
+                "🤖 МЕНЮ БОТА\n\n"
+                "Кнопки меню доступны над строкой ввода 👇",
+                replace_existing=True,
+            )
+        except Exception as error:
+            print(
+                f"Не удалось обновить меню в чате {chat_id}: {error}"
+            )
+
+
 async def post_init(application: Application):
     """
     Настраивает системное меню Telegram, а /start и /menu
@@ -1900,6 +1930,10 @@ async def post_init(application: Application):
     await application.bot.set_chat_menu_button(
         menu_button=MenuButtonCommands()
     )
+
+    # Обновляем клавиатуры в уже существующих группах, чтобы убрать
+    # старый placeholder «Выбери раздел 👇».
+    await refresh_existing_group_menus(application)
 
     print("Системное Menu Telegram настроено.")
     print("Группы: одно закреплённое сообщение-меню + Reply Keyboard.")
