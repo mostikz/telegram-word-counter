@@ -7,6 +7,7 @@ from telegram import (
     Update,
     BotCommand,
     MenuButtonCommands,
+    BotCommandScopeDefault,
 )
 from telegram.ext import (
     Application,
@@ -2103,12 +2104,16 @@ async def post_init(application: Application):
     показывает список команд бота.
     """
 
+    # Явно задаём команды для DEFAULT scope.
+    # Без scope Telegram-клиент в некоторых случаях может
+    # не обновить список команд для уже открытого чата.
     await application.bot.set_my_commands(
-        BOT_COMMANDS
+        commands=BOT_COMMANDS,
+        scope=BotCommandScopeDefault(),
     )
 
-    # Нативная кнопка Menu в интерфейсе Telegram.
-    # Она открывает список команд BOT_COMMANDS.
+    # Включаем именно стандартную кнопку Menu внизу чата.
+    # Telegram открывает из неё список команд BOT_COMMANDS.
     await application.bot.set_chat_menu_button(
         menu_button=MenuButtonCommands()
     )
