@@ -1716,7 +1716,26 @@ async def bot_added_to_group(
     is_in_chat = new_status in ("member", "administrator")
 
     if is_in_chat and not was_in_chat:
-        print(f"Бот добавлен в чат {chat.id}. Меню открывается только по /menu.")
+        try:
+            # При добавлении бота создаём и закрепляем само сообщение-меню.
+            # Reply Keyboard здесь НЕ отправляем, поэтому она не всплывает
+            # автоматически у пользователей при входе в чат.
+            await send_group_menu(
+                context.bot,
+                chat.id,
+                "🤖 МЕНЮ БОТА\n\n"
+                "Для открытия кнопок используй /menu 👇",
+                replace_existing=False,
+                show_keyboard=False,
+            )
+            print(
+                f"Бот добавлен в чат {chat.id}: меню создано и закреплено."
+            )
+        except Exception as error:
+            print(
+                f"Не удалось создать меню при добавлении в чат "
+                f"{chat.id}: {error}"
+            )
 
 
 
@@ -1892,11 +1911,7 @@ BOT_COMMANDS = [
 
 
 async def refresh_existing_group_menus(application: Application):
-    """
-    После перезапуска бота обновляет Reply Keyboard во всех уже известных
-    группах. Это нужно, чтобы Telegram получил новую клавиатуру без старого
-    input_field_placeholder (например, «Выбери раздел 👇»).
-    """
+    """Проверяет известные группы, не удаляя закреплённое меню."""
     db = get_db()
     cursor = db.cursor()
     cursor.execute("SELECT chat_id FROM bot_menu_messages")
@@ -1909,45 +1924,24 @@ async def refresh_existing_group_menus(application: Application):
                 application.bot,
                 chat_id,
                 "🤖 МЕНЮ БОТА\n\n"
-                "Для открытия кнопок используй /menu.",
-                replace_existing=True,
+                "Для открытия кнопок используй /menu 👇",
+                replace_existing=False,
                 show_keyboard=False,
             )
         except Exception as error:
-            print(
-                f"Не удалось обновить меню в чате {chat_id}: {error}"
-            )
+            print(f"Не удалось проверить меню в чате {chat_id}: {error}")
 
 
 async def reset_old_menu_state(application: Application):
-    """При перезапуске убирает старую Reply Keyboard, если она осталась открытой."""
+    """При перезапуске скрывает старую Reply Keyboard, но сохраняет меню в чате."""
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("SELECT chat_id, message_id FROM bot_menu_messages")
-    chats = cursor.fetchall()
+    cursor.execute("SELECT chat_id FROM bot_menu_messages")
+    chat_ids = [row[0] for row in cursor.fetchall()]
     db.close()
 
-    for chat_id, message_id in chats:
+    for chat_id in chat_ids:
         try:
-            # Убираем старое закреплённое меню.
-            try:
-                await application.bot.unpin_chat_message(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                )
-            except Exception:
-                pass
-
-            try:
-                await application.bot.delete_message(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                )
-            except Exception:
-                pass
-
-            # Reply Keyboard в Telegram остаётся активной после перезапуска,
-            # поэтому явно отправляем команду на её удаление.
             hide_message = await application.bot.send_message(
                 chat_id=chat_id,
                 text="\u200b",
@@ -1962,9 +1956,9 @@ async def reset_old_menu_state(application: Application):
             except Exception:
                 pass
 
-            print(f"Старое меню скрыто в чате {chat_id}")
+            print(f"Старая клавиатура скрыта в чате {chat_id}; меню сохранено")
         except Exception as error:
-            print(f"Не удалось скрыть старое меню в {chat_id}: {error}")
+            print(f"Не удалось скрыть старую клавиатуру в {chat_id}: {error}")
 
 
 async def post_init(application: Application):
@@ -1994,7 +1988,7 @@ async def post_init(application: Application):
     await refresh_existing_group_menus(application)
 
     print("Системное Menu Telegram настроено.")
-    print("Группы: одно закреплённое сообщение-меню + Reply Keyboard.")
+    print("Группы: закреплённое меню; Reply Keyboard открывается только по /menu.")
 
 
 
