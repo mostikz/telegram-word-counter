@@ -858,6 +858,25 @@ def make_period_stats_text(
 
 
 # ============================================================
+async def delete_command_message(update: Update):
+    """
+    Удаляет сообщение пользователя с командой после её обработки.
+    Требуются права бота на удаление сообщений в группе.
+    """
+    message = update.effective_message
+
+    if not message or message.chat.type not in ("group", "supergroup"):
+        return
+
+    try:
+        await message.delete()
+    except Exception as error:
+        print(
+            f"Не удалось удалить команду "
+            f"в чате {message.chat.id}: {error}"
+        )
+
+
 # /START
 # ============================================================
 
@@ -1614,6 +1633,18 @@ async def post_init(application: Application):
     print("Управление ботом: только команды с /.")
 
 
+async def run_command_and_delete(
+    handler,
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    """
+    Выполняет команду, затем удаляет исходное сообщение с /командой.
+    """
+    await handler(update, context)
+    await delete_command_message(update)
+
+
 # ЗАПУСК
 # ============================================================
 
@@ -1642,84 +1673,84 @@ def main():
     app.add_handler(
         CommandHandler(
             "start",
-            start
+            (lambda update, context: run_command_and_delete(start, update, context))
         )
     )
 
     app.add_handler(
         CommandHandler(
             "help",
-            help_command
+            (lambda update, context: run_command_and_delete(help_command, update, context))
         )
     )
 
     app.add_handler(
         CommandHandler(
             "stats",
-            stats
+            (lambda update, context: run_command_and_delete(stats, update, context))
         )
     )
 
     app.add_handler(
         CommandHandler(
             "me",
-            me
+            (lambda update, context: run_command_and_delete(me, update, context))
         )
     )
 
     app.add_handler(
         CommandHandler(
             "week",
-            week
+            (lambda update, context: run_command_and_delete(week, update, context))
         )
     )
 
     app.add_handler(
         CommandHandler(
             "month",
-            month
+            (lambda update, context: run_command_and_delete(month, update, context))
         )
     )
 
     app.add_handler(
         CommandHandler(
             "group",
-            group
+            (lambda update, context: run_command_and_delete(group, update, context))
         )
     )
 
     app.add_handler(
         CommandHandler(
             "activity",
-            activity
+            (lambda update, context: run_command_and_delete(activity, update, context))
         )
     )
 
     app.add_handler(
         CommandHandler(
             "hours",
-            hours
+            (lambda update, context: run_command_and_delete(hours, update, context))
         )
     )
 
     app.add_handler(
         CommandHandler(
             "achievements",
-            achievements
+            (lambda update, context: run_command_and_delete(achievements, update, context))
         )
     )
 
     app.add_handler(
         CommandHandler(
             "records",
-            records
+            (lambda update, context: run_command_and_delete(records, update, context))
         )
     )
 
     app.add_handler(
         CommandHandler(
             "fact",
-            fact
+            (lambda update, context: run_command_and_delete(fact, update, context))
         )
     )
 
