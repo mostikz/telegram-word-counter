@@ -905,8 +905,8 @@ def reply_keyboard():
             ["ℹ️ Помощь"],
         ],
         resize_keyboard=True,
-        one_time_keyboard=False,
-        is_persistent=True,
+        one_time_keyboard=True,
+        is_persistent=False,
     )
 
 async def get_saved_menu_message_id(chat_id: int):
@@ -2077,7 +2077,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # ОТЧЁТ В 20:30 ПО МОСКВЕ
+    # ОТЧЁТ В 20:00 ПО МОСКВЕ
     # --------------------------------------------------------
 
     app.job_queue.run_daily(
@@ -2086,7 +2086,7 @@ def main():
 
         time=time(
             hour=20,
-            minute=30,
+            minute=0,
             tzinfo=MOSCOW
         )
     )
@@ -2104,7 +2104,7 @@ def main():
     )
 
     print(
-        "Ежедневный отчёт: 20:30"
+        "Ежедневный отчёт: 20:00"
     )
 
     print(
