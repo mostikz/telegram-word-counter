@@ -6,6 +6,7 @@ from telegram import (
     Update,
     BotCommand,
     ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
     KeyboardButton,
 )
 from telegram.ext import (
@@ -886,7 +887,6 @@ MENU_HOURS = "🕐 По часам"
 MENU_ACHIEVEMENTS = "🏅 Достижения"
 MENU_RECORDS = "🏆 Рекорды"
 MENU_FACT = "🎲 Факт"
-MENU_HELP = "ℹ️ Помощь"
 
 
 def reply_keyboard():
@@ -902,11 +902,11 @@ def reply_keyboard():
             ["📊 Группа", "📈 Активность"],
             ["🕐 По часам", "🏅 Достижения"],
             ["🏆 Рекорды", "🎲 Факт"],
-            ["ℹ️ Помощь"],
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
         is_persistent=False,
+        selective=True,
     )
 
 async def get_saved_menu_message_id(chat_id: int):
@@ -964,6 +964,7 @@ async def send_group_menu(
     chat_id: int,
     text: str = "🤖 МЕНЮ БОТА",
     replace_existing: bool = False,
+    show_keyboard: bool = False,
 ):
     """
     Создаёт ровно одно служебное меню в группе и закрепляет его.
@@ -984,7 +985,7 @@ async def send_group_menu(
     menu_message = await bot.send_message(
         chat_id=chat_id,
         text=text,
-        reply_markup=reply_keyboard(),
+        reply_markup=reply_keyboard() if show_keyboard else None,
         disable_notification=True,
     )
 
@@ -1011,34 +1012,7 @@ async def send_group_menu(
 
 
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.effective_message
-    if not message:
-        return
-
-    if message.chat.type in ("group", "supergroup"):
-        await send_group_menu(
-            context.bot,
-            message.chat.id,
-            "🤖 МЕНЮ БОТА\n\n"
-            "Меню находится над строкой ввода 👇",
-            replace_existing=True,
-        )
-        try:
-            await message.delete()
-        except Exception:
-            pass
-    else:
-        await message.reply_text(
-            "Меню бота 👇",
-            reply_markup=reply_keyboard(),
-        )
-
-
-
-async def start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+    """Показывает меню только по явной команде /menu или /start."""
     message = update.effective_message
     if not message:
         return
@@ -1049,19 +1023,26 @@ async def start(
             message.chat.id,
             "🤖 МЕНЮ БОТА\n\n"
             "Выбирай раздел кнопками над строкой ввода 👇",
+            replace_existing=True,
+            show_keyboard=True,
         )
         try:
             await message.delete()
         except Exception:
             pass
-        return
+    else:
+        await message.reply_text(
+            "🤖 МЕНЮ БОТА",
+            reply_markup=reply_keyboard(),
+        )
 
-    await message.reply_text(
-        "Привет! 🤖\n\n"
-        "Это постоянное меню бота.\n"
-        "Кнопки находятся прямо над строкой ввода 👇",
-        reply_markup=reply_keyboard(),
-    )
+
+
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    await show_menu(update, context)
 
 
 
@@ -1615,7 +1596,6 @@ MENU_HANDLERS = {
     MENU_ACHIEVEMENTS: achievements,
     MENU_RECORDS: records,
     MENU_FACT: fact,
-    MENU_HELP: help_command,
 }
 
 
@@ -1645,6 +1625,26 @@ async def delete_menu_message_if_needed(message):
 # ОБРАБОТКА НАЖАТИЙ ПОСТОЯННОГО МЕНЮ
 # ============================================================
 
+async def hide_reply_keyboard(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    """Скрывает Reply Keyboard после выполнения выбранного пункта."""
+    try:
+        msg = await context.bot.send_message(
+            chat_id=chat_id,
+            text="\u200b",
+            reply_markup=ReplyKeyboardRemove(),
+            disable_notification=True,
+        )
+        try:
+            await context.bot.delete_message(
+                chat_id=chat_id,
+                message_id=msg.message_id,
+            )
+        except Exception:
+            pass
+    except Exception as error:
+        print(f"Не удалось скрыть Reply Keyboard в {chat_id}: {error}")
+
+
 async def reply_keyboard_handler(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
@@ -1665,9 +1665,29 @@ async def reply_keyboard_handler(
         # удалять сообщение пользователя до их выполнения нельзя.
         await MENU_HANDLERS[text_value](update, context)
 
-        # После успешной обработки удаляем сообщение с названием кнопки,
+        # Скрываем Reply Keyboard после выбора.
+        # В следующий раз она появится только после /menu.
+        try:
+            hide_message = await context.bot.send_message(
+                chat_id=message.chat.id,
+                text="\u200b",
+                reply_markup=ReplyKeyboardRemove(),
+                disable_notification=True,
+            )
+            try:
+                await context.bot.delete_message(
+                    chat_id=message.chat.id,
+                    message_id=hide_message.message_id,
+                )
+            except Exception:
+                pass
+        except Exception as error:
+            print(f"Не удалось скрыть меню в чате {message.chat.id}: {error}")
+
+        # Удаляем сообщение пользователя с названием кнопки,
         # чтобы в группе оставался только ответ бота.
         await delete_menu_message_if_needed(message)
+        await hide_reply_keyboard(context, message.chat.id)
 
         return
 
@@ -1680,10 +1700,7 @@ async def bot_added_to_group(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-    """
-    При добавлении бота в группу создаём одно служебное меню,
-    прикрепляем Reply Keyboard и закрепляем сообщение меню.
-    """
+    """Бот ничего не открывает автоматически при добавлении в группу."""
     event = update.my_chat_member
     if not event:
         return
@@ -1699,19 +1716,8 @@ async def bot_added_to_group(
     is_in_chat = new_status in ("member", "administrator")
 
     if is_in_chat and not was_in_chat:
-        try:
-            await send_group_menu(
-                context.bot,
-                chat.id,
-                "🤖 Бот подключён\n\n"
-                "Меню бота закреплено сверху.\n"
-                "Кнопки доступны над строкой ввода 👇",
-            )
-        except Exception as error:
-            print(
-                f"Не удалось создать меню в группе "
-                f"{chat.id}: {error}"
-            )
+        print(f"Бот добавлен в чат {chat.id}. Меню открывается только по /menu.")
+
 
 
 # ============================================================
@@ -1841,7 +1847,8 @@ async def daily_report(
                 context.bot,
                 chat_id,
                 "🤖 МЕНЮ БОТА\n\n"
-                "Кнопки меню доступны над строкой ввода 👇",
+                "Для открытия кнопок используй /menu.",
+                show_keyboard=False,
             )
 
             await context.bot.send_message(
@@ -1902,13 +1909,62 @@ async def refresh_existing_group_menus(application: Application):
                 application.bot,
                 chat_id,
                 "🤖 МЕНЮ БОТА\n\n"
-                "Кнопки меню доступны над строкой ввода 👇",
+                "Для открытия кнопок используй /menu.",
                 replace_existing=True,
+                show_keyboard=False,
             )
         except Exception as error:
             print(
                 f"Не удалось обновить меню в чате {chat_id}: {error}"
             )
+
+
+async def reset_old_menu_state(application: Application):
+    """При перезапуске убирает старую Reply Keyboard, если она осталась открытой."""
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT chat_id, message_id FROM bot_menu_messages")
+    chats = cursor.fetchall()
+    db.close()
+
+    for chat_id, message_id in chats:
+        try:
+            # Убираем старое закреплённое меню.
+            try:
+                await application.bot.unpin_chat_message(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                )
+            except Exception:
+                pass
+
+            try:
+                await application.bot.delete_message(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                )
+            except Exception:
+                pass
+
+            # Reply Keyboard в Telegram остаётся активной после перезапуска,
+            # поэтому явно отправляем команду на её удаление.
+            hide_message = await application.bot.send_message(
+                chat_id=chat_id,
+                text="\u200b",
+                reply_markup=ReplyKeyboardRemove(),
+                disable_notification=True,
+            )
+            try:
+                await application.bot.delete_message(
+                    chat_id=chat_id,
+                    message_id=hide_message.message_id,
+                )
+            except Exception:
+                pass
+
+            print(f"Старое меню скрыто в чате {chat_id}")
+        except Exception as error:
+            print(f"Не удалось скрыть старое меню в {chat_id}: {error}")
 
 
 async def post_init(application: Application):
@@ -1920,6 +1976,8 @@ async def post_init(application: Application):
     два разных механизма. Reply Keyboard появляется только
     после отправки сообщения с reply_markup.
     """
+    await reset_old_menu_state(application)
+
     from telegram import BotCommandScopeDefault, MenuButtonCommands
 
     await application.bot.set_my_commands(
@@ -1978,6 +2036,13 @@ def main():
         CommandHandler(
             "start",
             start
+        )
+    )
+
+    app.add_handler(
+        CommandHandler(
+            "menu",
+            show_menu
         )
     )
 
